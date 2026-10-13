@@ -1,0 +1,17 @@
+{
+  "name": "linklink",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plateforme d'organisation et de communication de l'équipe LinkLink",
+  "workspaces": ["server", "web"],
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "dev": "concurrently -n api,web -c teal,amber \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
