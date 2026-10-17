@@ -72,11 +72,29 @@ export async function api<T>(path: string, options?: Options): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Récupère un fichier (aperçu image) en gardant l'authentification ; renvoie une URL d'objet temporaire. */
+export async function fetchBlobUrl(path: string): Promise<string> {
+  const res = await rawRequest(path);
+  return URL.createObjectURL(await res.blob());
+}
+
 /** Télécharge un fichier en conservant l'authentification (en-tête Authorization). */
 export async function downloadFile(id: string, name: string) {
   const res = await rawRequest(`/files/${id}/download`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Télécharge le résultat d'une route de l'API (ex. export JSON) sous un nom donné. */
+export async function downloadBlob(path: string, name: string) {
+  const url = await fetchBlobUrl(path);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;

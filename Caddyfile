@@ -1,0 +1,6 @@
+# HTTPS automatique (Let's Encrypt) devant le serveur LinkLink, sur un VPS.
+# Remplacez le nom de domaine, puis : caddy run --config Caddyfile
+linklink.exemple.com {
+	encode zstd gzip
+	reverse_proxy localhost:3000
+}

@@ -2,16 +2,28 @@
   "name": "linklink",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Plateforme d'organisation et de communication de l'équipe LinkLink",
-  "workspaces": ["server", "web"],
-  "engines": { "node": ">=22.13" },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "dev": "concurrently -n api,web -c teal,amber \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev": "concurrently -n api,web -c blue,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run build -w web",
     "start": "npm run start -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm test -w server",
+    "test:e2e": "playwright test",
+    "backup": "npm run backup -w server",
+    "backup:verify": "npm run backup:verify -w server"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "concurrently": "^9.1.0"
   }
 }

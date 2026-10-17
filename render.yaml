@@ -1,0 +1,23 @@
+# Déploiement Render : https://render.com → New → Blueprint → choisir ce dépôt.
+services:
+  - type: web
+    name: linklink
+    runtime: docker
+    plan: starter            # un disque persistant exige une offre payante
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: DATA_DIR
+        value: /data
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false
+    disk:
+      name: linklink-data
+      mountPath: /data
+      sizeGB: 5

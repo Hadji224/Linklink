@@ -45,3 +45,28 @@ export function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** Date « AAAA-MM-JJ » (échéance) lisible : « Aujourd'hui », « Demain », « 12 oct. 2026 ». */
+export function formatDue(date: string) {
+  const t = new Date().toISOString().slice(0, 10);
+  const tm = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  if (date === t) return "Aujourd'hui";
+  if (date === tm) return 'Demain';
+  return shortFmt.format(new Date(`${date}T12:00:00`));
+}
+
+export const todayStr = () => new Date().toISOString().slice(0, 10);
+
+/** Fichier .ics (agenda) pour un rendez-vous. */
+export function icsFor(m: { id: string; title: string; description: string; location: string; startsAt: string }) {
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const start = new Date(m.startsAt);
+  const end = new Date(start.getTime() + 60 * 60_000);
+  const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/[,;]/g, (c) => `\\${c}`);
+  return [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//LinkLink//FR', 'BEGIN:VEVENT',
+    `UID:${m.id}@linklink`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`,
+    `SUMMARY:${esc(m.title)}`, `DESCRIPTION:${esc(m.description)}`, `LOCATION:${esc(m.location)}`,
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n');
+}

@@ -1,38 +1,25 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { db, getSetting, type UserRow } from './db.js';
+import { db, jwtSecret, type Role, type UserRow } from './db.js';
+import type { AuthUser } from './http.js';
 
-export interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'member';
-}
+export type { AuthUser };
 
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      user?: AuthUser;
-    }
-  }
-}
-
-const secret = () => getSetting('jwt_secret') as string;
-
-export function signToken(userId: string) {
-  return jwt.sign({ sub: userId }, secret(), { expiresIn: '30d' });
+export function signToken(user: Pick<UserRow, 'id' | 'token_version'>) {
+  return jwt.sign({ sub: user.id, tv: user.token_version }, jwtSecret(), { expiresIn: '30d' });
 }
 
 export function userFromToken(token: string | undefined | null): AuthUser | null {
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, secret()) as { sub?: string };
+    const payload = jwt.verify(token, jwtSecret()) as { sub?: string; tv?: number };
     if (!payload.sub) return null;
     const row = db
-      .prepare('SELECT id, name, email, role FROM users WHERE id = ?')
-      .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role'> | undefined;
-    return row ? { id: row.id, name: row.name, email: row.email, role: row.role } : null;
+      .prepare('SELECT id, name, email, role, token_version FROM users WHERE id = ?')
+      .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'token_version'> | undefined;
+    // Un changement de mot de passe ou de rôle invalide les anciennes sessions.
+    if (!row || (payload.tv ?? 0) !== row.token_version) return null;
+    return { id: row.id, name: row.name, email: row.email, role: row.role };
   } catch {
     return null;
   }
@@ -40,8 +27,7 @@ export function userFromToken(token: string | undefined | null): AuthUser | null
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.header('authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
-  const user = userFromToken(token);
+  const user = userFromToken(header?.startsWith('Bearer ') ? header.slice(7) : undefined);
   if (!user) {
     res.status(401).json({ error: 'Connexion requise.' });
     return;
@@ -50,15 +36,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (req.user?.role !== 'admin') {
-    res.status(403).json({ error: 'Réservé aux administrateurs.' });
-    return;
-  }
-  next();
-}
+export const requireRole =
+  (...roles: Role[]) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      res.status(403).json({ error: "Vous n'avez pas le droit d'effectuer cette action." });
+      return;
+    }
+    next();
+  };
 
-// Limiteur très simple (en mémoire) contre les essais répétés de mot de passe.
+export const requireAdmin = requireRole('admin');
+/** Super Admin et Fondateurs (tout sauf les invités internes). */
+export const requireStaff = requireRole('admin', 'member');
+
+// Limiteur en mémoire contre les essais répétés de mot de passe.
 const attempts = new Map<string, { count: number; resetAt: number }>();
 export function limitAuthAttempts(req: Request, res: Response, next: NextFunction) {
   const key = req.ip ?? 'unknown';
@@ -70,7 +62,7 @@ export function limitAuthAttempts(req: Request, res: Response, next: NextFunctio
     return;
   }
   entry.count += 1;
-  if (entry.count > 30) {
+  if (entry.count > (Number(process.env.AUTH_RATE_LIMIT) || 30)) {
     res.status(429).json({ error: 'Trop de tentatives. Réessayez dans quelques minutes.' });
     return;
   }

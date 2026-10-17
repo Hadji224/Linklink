@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+.git
+.e2e-data
+test-results
+playwright-report
+e2e
+server/data
+.env
