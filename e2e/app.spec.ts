@@ -202,6 +202,35 @@ test('messages : temps réel, non lus, DM privé, #annonces verrouillé, mention
   await guest.screenshot({ path: path.join(SCREENS, '09-messages-mobile.png') });
 });
 
+test('reconnexion : coupure du temps réel, indicateur, rattrapage des messages manqués', async () => {
+  // On s'interpose sur le WebSocket du fondateur pour simuler une perte de réseau (le mode « hors ligne » de Chromium ne coupe pas les sockets ouverts).
+  let blocked = false;
+  const live: { close: () => void }[] = [];
+  await founder.routeWebSocket(/\/ws/, (ws) => {
+    if (blocked) { ws.close(); return; }
+    ws.connectToServer();
+    live.push(ws);
+  });
+  await founder.reload();
+  await go(founder, 'messages');
+  await founder.getByRole('button', { name: /Awa Camara/ }).click();
+  await expect(founder.getByText('Message privé pour Moussa')).toBeVisible();
+  await expect(founder.getByText('● En ligne')).toBeVisible();
+
+  blocked = true;
+  live.forEach((ws) => ws.close());
+  await expect(founder.getByText('○ Reconnexion…')).toBeVisible();
+
+  // Pendant la coupure, le Super Admin écrit : le fondateur ne peut pas le recevoir en direct.
+  await admin.getByLabel('Votre message').locator('visible=true').fill('Écrit pendant la coupure');
+  await admin.getByRole('button', { name: 'Envoyer' }).locator('visible=true').click();
+  await expect(founder.getByText('Écrit pendant la coupure')).toHaveCount(0);
+
+  blocked = false; // le réseau revient : reconnexion automatique, puis rechargement des données
+  await expect(founder.getByText('● En ligne')).toBeVisible({ timeout: 30_000 });
+  await expect(founder.getByText('Écrit pendant la coupure')).toBeVisible();
+});
+
 test('documents : dépôt avec niveau, recherche, téléchargement, confidentialité', async () => {
   fs.writeFileSync('/tmp/candidature.pdf', '%PDF-1.4 test');
   fs.writeFileSync('/tmp/strategie.pdf', '%PDF-1.4 secret');

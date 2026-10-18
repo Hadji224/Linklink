@@ -30,6 +30,9 @@ Définissez `SMTP_URL` (ex. `smtps://utilisateur:motdepasse@smtp.exemple.com`) e
 - **Test de restauration mensuel** : `npm run backup:verify` (vérifie l'intégrité et compte les données).
 - **Restaurer** : arrêter le serveur, copier la sauvegarde sur `DATA_DIR/linklink.db`, relancer.
 
+## Surveillance
+Branchez [UptimeRobot](https://uptimerobot.com) (gratuit) sur `https://votre-domaine/api/health` : alerte e-mail si le service ne répond plus. Pour les erreurs applicatives, les messages d'erreur sortent sur la console du serveur (`docker logs linklink`).
+
 ## Journaux
 `DATA_DIR/logs/access-AAAA-MM.log` (une ligne JSON par requête, sans contenu) ; purgés après 12 mois. Lisibles par le Super Admin via `GET /api/admin/access-logs`. Le journal d'activité applicatif est dans l'écran *Journal*.
 

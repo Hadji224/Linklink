@@ -31,6 +31,7 @@ export function Team() {
   const toast = useToast();
   const [codes, setCodes] = useState<{ code?: string; guestCode?: string }>({});
   const [error, setError] = useState('');
+  const { logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const canInvite = user?.role !== 'guest';
 
@@ -110,6 +111,9 @@ export function Team() {
         {isAdmin && codes.guestCode && (
           <CodeBox label="Code d'invitation — Invités internes" code={codes.guestCode} help="Pour un prestataire temporaire : accès limité aux projets où vous l'ajoutez." onRegenerate={() => void regenerate('guest')} />
         )}
+        <button className="btn btn-ghost w-full md:w-auto" onClick={async () => { if (await confirm({ title: 'Se déconnecter ?', confirmLabel: 'Se déconnecter' })) logout(); }}>
+          <Icon name="logout" className="h-4 w-4" /> Se déconnecter
+        </button>
       </div>
     </div>
   );

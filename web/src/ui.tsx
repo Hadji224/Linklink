@@ -197,7 +197,7 @@ export function Icon({ name, className = 'h-5 w-5' }: { name: IconName; classNam
 
 /** Logo officiel (charte §3) : image fournie, jamais recomposée. `symbol` = symbole seul (petites tailles, ≥ 32 px). */
 export function Logo({ symbol = false, className = 'h-10' }: { symbol?: boolean; className?: string }) {
-  return <img src={symbol ? '/logo-symbol.png' : '/logo.png'} alt="LinkLink" className={`w-auto ${className}`} draggable={false} />;
+  return <img src={symbol ? '/logo-symbol.png' : '/logo.png'} width={635} height={symbol ? 590 : 770} alt="LinkLink" className={`w-auto ${className}`} draggable={false} />;
 }
 
 /** Icône colorée selon le type de fichier (cahier F-FILE-04). */

@@ -301,6 +301,20 @@ describe('Journal, RGPD, sécurité', () => {
     expect((await founder.get('/admin/access-logs')).status).toBe(403);
     expect((await founder.get(`/projects/${projectId}/activity`)).data.activity.length).toBeGreaterThan(0);
   });
+  it("promotion d'un fondateur en Super Admin : droits étendus, ancienne session invalidée, rétrogradation", async () => {
+    const c = new Client(srv.url);
+    await c.register('Promu Test', 'promu@t.test', srv.codes.member);
+    expect((await c.get('/activity')).status).toBe(403);
+    expect((await c.post('/channels', { name: 'promu' })).status).toBe(403);
+    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'admin' })).status).toBe(200);
+    expect((await c.get('/me')).status).toBe(401); // il doit se reconnecter pour appliquer son nouveau rôle
+    c.token = (await c.post('/auth/login', { email: 'promu@t.test', password: 'motdepasse123' })).data.token;
+    expect((await c.get('/activity')).status).toBe(200);
+    expect((await c.post('/channels', { name: 'promu' })).status).toBe(201);
+    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'member' })).status).toBe(200);
+    c.token = (await c.post('/auth/login', { email: 'promu@t.test', password: 'motdepasse123' })).data.token;
+    expect((await c.get('/activity')).status).toBe(403);
+  });
   it('droit d\'accès : export JSON des données personnelles', async () => {
     const r = await founder.get('/me/export');
     expect(r.status).toBe(200);

@@ -52,7 +52,8 @@ Dockerfile, `render.yaml` (Render) et `Caddyfile` (VPS + HTTPS automatique) sont
 
 ## Documentation
 
-- [Guide utilisateur](docs/guide-utilisateur.md)
+- [Guide utilisateur](docs/guide-utilisateur.md) ([PDF](docs/guide-utilisateur.pdf))
+- [Conformité au cahier des charges](docs/conformite-cahier.md)
 - [Déploiement et exploitation](docs/deploiement.md)
 - [Sécurité (OWASP)](docs/securite.md)
 - [Registre des traitements RGPD](docs/rgpd-registre.md)
