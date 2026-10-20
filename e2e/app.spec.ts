@@ -104,10 +104,10 @@ test("équipe : codes d'invitation, inscription fondateur et invité", async () 
 test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention', async () => {
   await go(founder, 'projets');
   await founder.getByRole('button', { name: 'Nouveau projet' }).click();
-  await founder.getByLabel('Nom du projet').fill('Campus France');
-  await founder.getByLabel('Description').fill('Dossiers de candidature');
+  await founder.getByLabel('Nom du projet').fill('Application mobile');
+  await founder.getByLabel('Description').fill('Application Android et API');
   await founder.getByRole('button', { name: 'Créer le projet' }).click();
-  await expect(founder.getByRole('heading', { name: 'Campus France', level: 1 })).toBeVisible();
+  await expect(founder.getByRole('heading', { name: 'Application mobile', level: 1 })).toBeVisible();
   await founder.screenshot({ path: path.join(SCREENS, '03-projet-apercu.png') });
 
   // Ajout de l'invité au projet
@@ -118,18 +118,18 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
 
   await founder.getByRole('tab', { name: 'Tâches' }).click();
   await founder.getByRole('button', { name: 'Nouvelle tâche' }).click();
-  await founder.getByLabel('Titre').fill('Rassembler les pièces');
+  await founder.getByLabel('Titre').fill('Corriger le bug de connexion');
   await founder.getByLabel('Assignée à').selectOption({ label: 'Ibrahima Soumah' });
   await founder.getByLabel('Priorité').selectOption('urgent');
   await founder.getByLabel('Échéance').fill(new Date().toISOString().slice(0, 10));
-  await founder.getByPlaceholder('Ajouter une étape').fill('Passeport');
+  await founder.getByPlaceholder('Ajouter une étape').fill('Écrire les tests');
   await founder.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await founder.getByRole('button', { name: 'Créer la tâche' }).click();
-  await expect(founder.getByRole('dialog', { name: 'Rassembler les pièces' })).toBeVisible();
+  await expect(founder.getByRole('dialog', { name: 'Corriger le bug de connexion' })).toBeVisible();
   await expect(founder.getByText('Votre rôle : Créateur')).toBeVisible();
 
   // Sous-tâche cochée + commentaire avec mention
-  await founder.getByRole('checkbox', { name: 'Passeport' }).check();
+  await founder.getByRole('checkbox', { name: 'Écrire les tests' }).check();
   await founder.getByLabel('Votre commentaire').fill('Merci @Ibrahima');
   await founder.getByRole('listbox', { name: 'Mentionner' }).getByRole('option', { name: /Ibrahima Soumah/ }).click();
   await founder.getByRole('button', { name: 'Commenter' }).click();
@@ -138,7 +138,7 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await founder.keyboard.press('Escape');
 
   // Kanban : déplacement en « En cours »
-  const card = founder.locator('article', { hasText: 'Rassembler les pièces' });
+  const card = founder.locator('article', { hasText: 'Corriger le bug de connexion' });
   await card.getByRole('button', { name: 'Déplacer vers En cours' }).click();
   await expect(founder.getByRole('region', { name: /^En cours \(1\)/ })).toBeVisible();
   await founder.screenshot({ path: path.join(SCREENS, '05-kanban.png') });
@@ -149,17 +149,17 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await expect(guest.getByRole('button', { name: /Moussa Bah vous a mentionné/ })).toBeVisible();
   await guest.screenshot({ path: path.join(SCREENS, '06-notifications-mobile.png') });
   await go(guest, 'accueil');
-  await expect(guest.getByText('Rassembler les pièces')).toBeVisible();
+  await expect(guest.getByText('Corriger le bug de connexion')).toBeVisible();
   await guest.screenshot({ path: path.join(SCREENS, '07-accueil-mobile.png') });
   await go(guest, 'projets');
-  await expect(guest.getByRole('link', { name: /Campus France/ })).toBeVisible();
+  await expect(guest.getByRole('link', { name: /Application mobile/ })).toBeVisible();
 });
 
 test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amendement v1.1", async () => {
   // Assigné (l'invité, sur téléphone) : statut modifiable, tout le reste grisé.
   await go(guest, 'taches');
-  await guest.getByRole('button', { name: /Rassembler les pièces/ }).first().click();
-  const g = guest.getByRole('dialog', { name: 'Rassembler les pièces' });
+  await guest.getByRole('button', { name: /Corriger le bug de connexion/ }).first().click();
+  const g = guest.getByRole('dialog', { name: 'Corriger le bug de connexion' });
   await expect(g).toBeVisible();
   await expect(g.getByText('Votre rôle : Assigné')).toBeVisible();
   await expect(g.getByLabel('Titre')).toBeDisabled();
@@ -169,22 +169,22 @@ test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amen
   const steps = g.getByRole('group', { name: 'Statut de la tâche' });
   await steps.getByRole('button', { name: 'En révision' }).click();
   await expect(steps.getByRole('button', { name: /✓ En révision/ })).toBeVisible();
-  await g.getByLabel('Votre commentaire').fill('Pièces envoyées, à vérifier.');
+  await g.getByLabel('Votre commentaire').fill('Correctif envoyé, à vérifier.');
   await g.getByRole('button', { name: 'Commenter' }).click();
-  await expect(g.getByText('Pièces envoyées, à vérifier.')).toBeVisible();
+  await expect(g.getByText('Correctif envoyé, à vérifier.')).toBeVisible();
   await expect(g.getByText(/Ibrahima Soumah a changé le statut de « En cours » à « En révision »/)).toBeVisible(); // historique
   await guest.screenshot({ path: path.join(SCREENS, '04b-tache-assigne-mobile.png') });
   await guest.keyboard.press('Escape');
 
   // Le créateur est prévenu du changement de statut.
   await go(founder, 'notifications');
-  await expect(founder.getByRole('button', { name: /Ibrahima Soumah a passé « Rassembler les pièces » à « En révision »/ })).toBeVisible();
+  await expect(founder.getByRole('button', { name: /Ibrahima Soumah a passé « Corriger le bug de connexion » à « En révision »/ })).toBeVisible();
 
   // Le Super Admin crée une tâche dans le projet : le fondateur n'en est qu'observateur.
   await go(admin, 'taches');
   await admin.getByRole('button', { name: 'Nouvelle tâche' }).click();
   const nt = admin.getByRole('dialog', { name: 'Nouvelle tâche' });
-  await nt.getByLabel('Projet').selectOption({ label: 'Campus France' });
+  await nt.getByLabel('Projet').selectOption({ label: 'Application mobile' });
   await nt.getByLabel('Titre').fill('Valider le budget');
   await nt.getByRole('button', { name: 'Créer la tâche' }).click();
   const a = admin.getByRole('dialog', { name: 'Valider le budget' });
@@ -285,15 +285,15 @@ test('reconnexion : coupure du temps réel, indicateur, rattrapage des messages 
 });
 
 test('documents : dépôt avec niveau, recherche, téléchargement, confidentialité', async () => {
-  fs.writeFileSync('/tmp/candidature.pdf', '%PDF-1.4 test');
+  fs.writeFileSync('/tmp/specification.pdf', '%PDF-1.4 test');
   fs.writeFileSync('/tmp/strategie.pdf', '%PDF-1.4 secret');
   await go(founder, 'documents');
   await founder.getByRole('button', { name: /Général/ }).first().click();
   await founder.getByRole('button', { name: 'Déposer' }).click();
-  await founder.getByLabel('Choisir des fichiers').setInputFiles('/tmp/candidature.pdf');
+  await founder.getByLabel('Choisir des fichiers').setInputFiles('/tmp/specification.pdf');
   await founder.getByLabel('Niveau de confidentialité').selectOption('internal');
   await founder.getByRole('button', { name: /^Déposer 1/ }).click();
-  await expect(founder.getByText('candidature.pdf').first()).toBeVisible();
+  await expect(founder.getByText('specification.pdf').first()).toBeVisible();
 
   await founder.getByRole('button', { name: 'Déposer' }).click();
   await founder.getByLabel('Choisir des fichiers').setInputFiles('/tmp/strategie.pdf');
@@ -304,10 +304,10 @@ test('documents : dépôt avec niveau, recherche, téléchargement, confidential
 
   // Le Super Admin voit les deux, peut rechercher et télécharger
   await go(admin, 'documents');
-  await admin.getByLabel('Rechercher un fichier').fill('candid');
-  await expect(admin.getByText('candidature.pdf').first()).toBeVisible();
+  await admin.getByLabel('Rechercher un fichier').fill('specif');
+  await expect(admin.getByText('specification.pdf').first()).toBeVisible();
   const dl = admin.waitForEvent('download');
-  await admin.getByRole('button', { name: 'Télécharger candidature.pdf' }).click();
+  await admin.getByRole('button', { name: 'Télécharger specification.pdf' }).click();
   expect(fs.readFileSync(await (await dl).path(), 'utf8')).toBe('%PDF-1.4 test');
   await admin.getByLabel('Rechercher un fichier').fill('strategie');
   await expect(admin.getByText('strategie.pdf').first()).toBeVisible();
@@ -360,7 +360,7 @@ test('profil, RGPD, journal, pages légales', async () => {
   await founder.screenshot({ path: path.join(SCREENS, '12-profil.png') });
 
   await go(admin, 'journal');
-  await expect(admin.getByText(/Projet « Campus France » créé/)).toBeVisible();
+  await expect(admin.getByText(/Projet « Application mobile » créé/)).toBeVisible();
   await admin.screenshot({ path: path.join(SCREENS, '13-journal.png') });
   await go(founder, 'journal'); // route réservée : retombe sur l'accueil
   await expect(founder.getByRole('heading', { name: /^(Bonjour|Bonsoir)/ })).toBeVisible();
@@ -372,7 +372,7 @@ test('profil, RGPD, journal, pages légales', async () => {
 
 test('archivage : seul un projet terminé s’archive, puis lecture seule', async () => {
   await go(founder, 'projets');
-  await founder.getByRole('link', { name: /Campus France/ }).click();
+  await founder.getByRole('link', { name: /Application mobile/ }).click();
   await founder.getByRole('button', { name: 'Modifier' }).click();
   await founder.getByLabel('Statut').selectOption('done');
   await founder.getByRole('button', { name: 'Enregistrer' }).click();

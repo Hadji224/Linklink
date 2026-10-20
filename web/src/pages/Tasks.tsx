@@ -156,7 +156,7 @@ function TaskForm({ projectId, value, onChange, can = { edit: true, reassign: tr
         )}
       </div>
       <Field label="Étiquettes" hint="Séparées par des virgules.">
-        <input className="field" value={value.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="ex. visa, urgent" {...ro(can.edit)} />
+        <input className="field" value={value.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="ex. backend, bug, urgent" {...ro(can.edit)} />
       </Field>
     </div>
   );

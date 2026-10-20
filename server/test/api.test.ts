@@ -63,7 +63,7 @@ describe('Authentification & rôles (F-AUTH, §4.2)', () => {
 describe('Projets (F-PROJ)', () => {
   it('un invité ne peut pas créer de projet ; un fondateur oui (et devient membre)', async () => {
     expect((await guest.post('/projects', { name: 'Interdit' })).status).toBe(403);
-    const r = await founder.post('/projects', { name: 'Campus France', description: 'Dossiers', color: '#11C6D8' });
+    const r = await founder.post('/projects', { name: 'Application mobile', description: 'Application Android et API', color: '#11C6D8' });
     expect(r.status).toBe(201);
     projectId = r.data.project.id;
     expect(r.data.project.members.map((m: any) => m.id)).toContain(founder.user.id);
@@ -84,14 +84,14 @@ describe('Projets (F-PROJ)', () => {
   });
   it('filtre par statut et recherche', async () => {
     expect((await admin.get('/projects?status=paused')).data.projects).toHaveLength(0);
-    expect((await admin.get('/projects?q=campus')).data.projects).toHaveLength(1);
+    expect((await admin.get('/projects?q=application')).data.projects).toHaveLength(1);
   });
 });
 
 describe('Tâches (F-TASK)', () => {
   let taskId: string;
   it('crée une tâche avec sous-tâches, tags et assignation → notification instantanée', async () => {
-    const r = await founder.post('/tasks', { projectId, title: 'Rassembler les pièces', assigneeId: guest.user.id, dueDate: tomorrow(), priority: 'urgent', tags: ['visa'], subtasks: ['Passeport', 'Relevés'] });
+    const r = await founder.post('/tasks', { projectId, title: 'Corriger le bug de connexion', assigneeId: guest.user.id, dueDate: tomorrow(), priority: 'urgent', tags: ['backend'], subtasks: ['Écrire les tests', 'Déployer le correctif'] });
     expect(r.status).toBe(201);
     taskId = r.data.task.id;
     expect(r.data.task.subtasks).toHaveLength(2);
@@ -354,10 +354,10 @@ describe('Dossiers & fichiers (F-FILE, confidentialité)', () => {
     expect(ok.data.file.mime).toBe('application/pdf');
   });
   it('arborescence : sous-dossiers, recherche par nom/auteur', async () => {
-    const sub = await founder.post('/folders', { name: 'Visa', parentId: projectFolder });
+    const sub = await founder.post('/folders', { name: 'Maquettes', parentId: projectFolder });
     expect(sub.status).toBe(201);
-    await founder.upload({ name: 'passeport.png', content: 'png' }, { folderId: sub.data.folder.id });
-    expect((await founder.get('/files?q=passeport')).data.files).toHaveLength(1);
+    await founder.upload({ name: 'maquette.png', content: 'png' }, { folderId: sub.data.folder.id });
+    expect((await founder.get('/files?q=maquette')).data.files).toHaveLength(1);
     expect((await founder.get(`/files?author=${admin.user.id}`)).data.files).toHaveLength(0);
     expect((await outsider.get(`/files?folderId=${projectFolder}`)).data.files).toHaveLength(0);
   });

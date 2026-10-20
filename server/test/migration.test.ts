@@ -35,7 +35,7 @@ describe('Migration v1 → v2', () => {
     db.prepare("INSERT INTO users VALUES ('u1','Ancien Admin','ancien@t.test',?, 'admin', ?)").run(hash, t);
     db.prepare("INSERT INTO settings VALUES ('invite_code','AAAA-BBBB')").run();
     db.prepare("INSERT INTO channels VALUES ('c1','général','',0,?)").run(t);
-    db.prepare("INSERT INTO files VALUES ('f1','ancien.pdf','stored1','application/pdf',10,'Campus France','u1',?)").run(t);
+    db.prepare("INSERT INTO files VALUES ('f1','ancien.pdf','stored1','application/pdf',10,'Application mobile','u1',?)").run(t);
     db.prepare("INSERT INTO files VALUES ('f2','chat.txt','stored2','text/plain',5,'Général','u1',?)").run(t);
     db.prepare("INSERT INTO messages VALUES ('m1','c1','u1','Vieux message',NULL,?)").run(t);
     db.prepare("INSERT INTO messages VALUES ('m2','c1','u1','',  'f2',?)").run(t);
@@ -58,7 +58,7 @@ describe('Migration v1 → v2', () => {
     expect(msgs.map((m: any) => m.body)).toContain('Vieux message');
     expect(msgs.some((m: any) => m.file?.name === 'chat.txt')).toBe(true);
     const folders = (await c.get('/folders')).data.folders;
-    const cf = folders.find((f: any) => f.name === 'Campus France');
+    const cf = folders.find((f: any) => f.name === 'Application mobile');
     expect(cf).toBeTruthy();
     expect((await c.get(`/files?folderId=${cf.id}`)).data.files.map((f: any) => f.name)).toEqual(['ancien.pdf']);
     expect((await c.get('/meetings')).data.meetings.map((m: any) => m.title)).toContain('Vieux RDV');
