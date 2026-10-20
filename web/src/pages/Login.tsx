@@ -125,7 +125,7 @@ export function Login() {
           )}
         </form>
         <p className="mt-4 text-center text-xs text-blue-200">
-          <a href="#legal/cgu" className="underline">Conditions d'utilisation</a> · <a href="#legal/confidentialite" className="underline">Confidentialité</a>
+          <a href="#legal/cgu" className="underline">Conditions d'utilisation</a> · <a href="#legal/confidentialite" className="underline">Confidentialité</a> · {__APP_VERSION__}
         </p>
       </div>
     </main>

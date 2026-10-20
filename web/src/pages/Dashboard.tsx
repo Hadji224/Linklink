@@ -62,7 +62,7 @@ export function Dashboard() {
                   <a href="#taches" className="text-sm font-semibold text-electric hover:underline">Toutes les tâches</a>
                 </div>
                 {data.myTasksToday.length === 0 ? (
-                  <Empty>Aucune tâche à rendre aujourd'hui. 🎉</Empty>
+                  <Empty icon="tasks" title="Journée libre">Aucune tâche à rendre aujourd'hui. 🎉</Empty>
                 ) : (
                   <ul className="space-y-2">
                     {data.myTasksToday.map((t) => (
@@ -84,7 +84,7 @@ export function Dashboard() {
               <div className="min-w-0 space-y-4">
                 <section className="card p-4" aria-label="Rendez-vous à venir">
                   <h2 className="mb-2 font-bold">Rendez-vous à venir</h2>
-                  {data.upcomingMeetings.length === 0 ? <Empty>Aucun rendez-vous prévu.</Empty> : (
+                  {data.upcomingMeetings.length === 0 ? <Empty icon="calendar">Aucun rendez-vous prévu.</Empty> : (
                     <ul className="space-y-2">
                       {data.upcomingMeetings.map((m) => (
                         <li key={m.id}>
@@ -99,7 +99,7 @@ export function Dashboard() {
                 </section>
                 <section className="card p-4" aria-label="Messages non lus">
                   <h2 className="mb-2 font-bold">Messages non lus {unreadMessages > 0 && <span className="text-sm font-normal text-slate">({unreadMessages})</span>}</h2>
-                  {data.unreadChannels.length === 0 ? <Empty>Vous êtes à jour.</Empty> : (
+                  {data.unreadChannels.length === 0 ? <Empty icon="chat">Vous êtes à jour.</Empty> : (
                     <ul className="space-y-1">
                       {data.unreadChannels.map((c) => (
                         <li key={c.id}>

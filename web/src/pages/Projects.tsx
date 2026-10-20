@@ -250,7 +250,7 @@ function ActivityTab({ id }: { id: string }) {
   return (
     <div className="p-3 md:p-5">
       {!items && <Spinner />}
-      {items && items.length === 0 && <Empty>Aucune activité pour l'instant.</Empty>}
+      {items && items.length === 0 && <Empty icon="history">Aucune activité pour l'instant.</Empty>}
       <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-white ring-1 ring-line">
         {items?.map((i) => <li key={i.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-2.5 text-sm"><span><strong>{i.userName}</strong> — {i.summary}</span><time className="text-xs text-slate" dateTime={i.createdAt}>{formatDateTime(i.createdAt)}</time></li>)}
       </ul>

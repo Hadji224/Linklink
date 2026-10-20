@@ -228,7 +228,7 @@ export function ChatPanel({ channelId, active, onBack }: PanelProps) {
           </div>
         )}
         {loading && messages.length === 0 && <p className="py-8 text-center text-sm text-slate">Chargement…</p>}
-        {!loading && messages.length === 0 && !error && <Empty>Aucun message pour l'instant. Lancez la discussion !</Empty>}
+        {!loading && messages.length === 0 && !error && <Empty icon="chat">Aucun message pour l'instant. Lancez la discussion !</Empty>}
         {messages.map((m, i) => {
           const prev = messages[i - 1];
           const newDay = !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
@@ -422,7 +422,7 @@ export function Chat({ active }: { active: boolean }) {
         {channelId ? (
           <ChatPanel key={channelId} channelId={channelId} active={active} onBack={() => setChannelId(null)} />
         ) : (
-          <Empty>Choisissez un salon ou une conversation.</Empty>
+          <Empty icon="chat">Choisissez un salon ou une conversation.</Empty>
         )}
       </div>
 

@@ -195,7 +195,7 @@ export function MeetingList({ projectId, readOnly = false }: { projectId?: strin
       )}
       <ErrorNote>{error}</ErrorNote>
       {meetings === null && !error && <Spinner />}
-      {meetings && upcoming.length === 0 && <Empty>Aucun rendez-vous à venir.{canCreate ? ' Créez-en un avec « Nouveau ».' : ''}</Empty>}
+      {meetings && upcoming.length === 0 && <Empty icon="calendar" title="Aucun rendez-vous à venir">{canCreate ? 'Créez-en un avec « Nouveau ».' : 'Rien de prévu pour le moment.'}</Empty>}
       {upcoming.map((m) => <MeetingCard key={m.id} m={m} onChange={() => void load()} />)}
       {past.length > 0 && (
         <details className="pt-2">

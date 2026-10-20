@@ -16,7 +16,7 @@ export function Notifications() {
         {unreadNotifs > 0 && <button className="btn btn-ghost btn-sm" onClick={() => void markNotifsRead()}><Icon name="check" className="h-4 w-4" /> Tout marquer comme lu</button>}
       </PageHeader>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-2xl">
-        {notifications.length === 0 && <Empty>Aucune notification pour l'instant.</Empty>}
+        {notifications.length === 0 && <Empty icon="bell">Aucune notification pour l'instant.</Empty>}
         <ul className="space-y-2">
           {notifications.map((n) => (
             <li key={n.id}>

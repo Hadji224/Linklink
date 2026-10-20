@@ -125,6 +125,7 @@ export function Profile() {
           </form>
         </Modal>
       )}
+      <p className="pb-4 text-center text-xs text-slate">LinkLink {__APP_VERSION__}</p>
     </div>
   );
 }

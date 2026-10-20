@@ -94,7 +94,7 @@ function Shell() {
             {user && <Avatar name={user.name} size={26} />}
             <span className="min-w-0 truncate">{user?.name}</span>
           </a>
-          <p className="px-3 pt-1 text-xs text-blue-200" role="status">{connected ? '● En ligne' : '○ Reconnexion…'}</p>
+          <p className="px-3 pt-1 text-xs text-blue-200" role="status">{connected ? '● En ligne' : '○ Reconnexion…'} <span className="opacity-70">· {__APP_VERSION__}</span></p>
         </nav>
       </aside>
 

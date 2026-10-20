@@ -600,7 +600,7 @@ function ListView({ tasks, onOpen, onToggle, showProject, readOnly }: { tasks: T
           <option value="due">Échéance</option><option value="priority">Priorité</option><option value="assignee">Assigné</option><option value="status">Statut</option>
         </select>
       </div>
-      {sorted.length === 0 && <Empty>Aucune tâche.</Empty>}
+      {sorted.length === 0 && <Empty icon="tasks" title="Aucune tâche">Créez-en une avec « Nouvelle tâche ».</Empty>}
       <ul className="space-y-2">
         {sorted.map((t) => (
           <li key={t.id} className="card flex items-center gap-3 p-3" style={{ borderLeft: `4px solid ${t.project.color}` }}>

@@ -53,7 +53,7 @@ export function Journal() {
         <input className="field mb-3" placeholder="Filtrer (nom, action…)" aria-label="Filtrer le journal" value={q} onChange={(e) => setQ(e.target.value)} />
         <ErrorNote>{error}</ErrorNote>
         {!items && !error && <Spinner />}
-        {items && shown.length === 0 && <Empty>Aucune entrée.</Empty>}
+        {items && shown.length === 0 && <Empty icon="shield">Aucune entrée.</Empty>}
         <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-white ring-1 ring-line">
           {shown.map((i) => (
             <li key={i.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-2.5 text-sm">
