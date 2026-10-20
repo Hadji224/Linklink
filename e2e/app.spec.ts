@@ -125,7 +125,8 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await founder.getByPlaceholder('Ajouter une étape').fill('Passeport');
   await founder.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await founder.getByRole('button', { name: 'Créer la tâche' }).click();
-  await expect(founder.getByRole('dialog', { name: 'Détail de la tâche' })).toBeVisible();
+  await expect(founder.getByRole('dialog', { name: 'Rassembler les pièces' })).toBeVisible();
+  await expect(founder.getByText('Votre rôle : Créateur')).toBeVisible();
 
   // Sous-tâche cochée + commentaire avec mention
   await founder.getByRole('checkbox', { name: 'Passeport' }).check();
@@ -152,6 +153,58 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await guest.screenshot({ path: path.join(SCREENS, '07-accueil-mobile.png') });
   await go(guest, 'projets');
   await expect(guest.getByRole('link', { name: /Campus France/ })).toBeVisible();
+});
+
+test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amendement v1.1", async () => {
+  // Assigné (l'invité, sur téléphone) : statut modifiable, tout le reste grisé.
+  await go(guest, 'taches');
+  await guest.getByRole('button', { name: /Rassembler les pièces/ }).first().click();
+  const g = guest.getByRole('dialog', { name: 'Rassembler les pièces' });
+  await expect(g).toBeVisible();
+  await expect(g.getByText('Votre rôle : Assigné')).toBeVisible();
+  await expect(g.getByLabel('Titre')).toBeDisabled();
+  await expect(g.getByLabel('Priorité')).toBeDisabled();
+  await expect(g.getByLabel('Assignée à')).toBeDisabled();
+  await expect(g.getByRole('button', { name: 'Enregistrer' })).toHaveCount(0);
+  const steps = g.getByRole('group', { name: 'Statut de la tâche' });
+  await steps.getByRole('button', { name: 'En révision' }).click();
+  await expect(steps.getByRole('button', { name: /✓ En révision/ })).toBeVisible();
+  await g.getByLabel('Votre commentaire').fill('Pièces envoyées, à vérifier.');
+  await g.getByRole('button', { name: 'Commenter' }).click();
+  await expect(g.getByText('Pièces envoyées, à vérifier.')).toBeVisible();
+  await expect(g.getByText(/Ibrahima Soumah a changé le statut de « En cours » à « En révision »/)).toBeVisible(); // historique
+  await guest.screenshot({ path: path.join(SCREENS, '04b-tache-assigne-mobile.png') });
+  await guest.keyboard.press('Escape');
+
+  // Le créateur est prévenu du changement de statut.
+  await go(founder, 'notifications');
+  await expect(founder.getByRole('button', { name: /Ibrahima Soumah a passé « Rassembler les pièces » à « En révision »/ })).toBeVisible();
+
+  // Le Super Admin crée une tâche dans le projet : le fondateur n'en est qu'observateur.
+  await go(admin, 'taches');
+  await admin.getByRole('button', { name: 'Nouvelle tâche' }).click();
+  const nt = admin.getByRole('dialog', { name: 'Nouvelle tâche' });
+  await nt.getByLabel('Projet').selectOption({ label: 'Campus France' });
+  await nt.getByLabel('Titre').fill('Valider le budget');
+  await nt.getByRole('button', { name: 'Créer la tâche' }).click();
+  const a = admin.getByRole('dialog', { name: 'Valider le budget' });
+  await expect(a.getByText('Votre rôle : Super Admin')).toBeVisible();
+  await expect(a.getByLabel('Titre')).toBeEnabled();
+  await admin.keyboard.press('Escape');
+
+  await go(founder, 'taches');
+  await founder.getByRole('button', { name: /Valider le budget/ }).first().click();
+  const o = founder.getByRole('dialog', { name: 'Valider le budget' });
+  await expect(o.getByText('👁️ Lecture seule')).toBeVisible();
+  await expect(o.getByLabel('Titre')).toBeDisabled();
+  await expect(o.getByRole('button', { name: 'Enregistrer' })).toHaveCount(0);
+  await expect(o.getByRole('group', { name: 'Statut de la tâche' }).getByRole('button', { name: 'En cours' })).toBeDisabled();
+  await expect(o.getByRole('button', { name: 'Actions sur la tâche' })).toHaveCount(0); // ni archivage, ni suppression
+  await o.getByLabel('Votre commentaire').fill('Je valide côté finances.');
+  await o.getByRole('button', { name: 'Commenter' }).click(); // les observateurs peuvent toujours commenter
+  await expect(o.getByText('Je valide côté finances.')).toBeVisible();
+  await founder.screenshot({ path: path.join(SCREENS, '04c-tache-observateur.png') });
+  await founder.keyboard.press('Escape');
 });
 
 test('invité : ne peut pas créer de projet ni de rendez-vous, ne voit pas ceux des autres', async () => {

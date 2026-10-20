@@ -92,12 +92,33 @@ export interface Task {
   subtasksDone: number;
   commentCount: number;
   attachmentCount: number;
+  archivedAt: string | null;
+  /** Rôle de l'utilisateur sur cette tâche (amendement v1.1 §5.3.1) et ce qu'il peut y faire. */
+  myRole: TaskRole;
+  lock: 'none' | 'locked' | 'archived';
+  permissions: TaskPermissions;
 }
+
+export type TaskRole = 'admin' | 'creator' | 'assignee' | 'observer';
+export const TASK_ROLE_LABEL: Record<TaskRole, string> = { admin: 'Super Admin', creator: 'Créateur', assignee: 'Assigné', observer: 'Observateur' };
+
+export interface TaskPermissions {
+  edit: boolean;
+  status: boolean;
+  reassign: boolean;
+  delete: boolean;
+  subtask: boolean;
+  archive: boolean;
+  unarchive: boolean;
+}
+
+export interface TaskHistoryEntry { id: string; user: string; field: string; oldValue: string | null; newValue: string | null; createdAt: string }
 
 export interface TaskDetail extends Task {
   subtasks: { id: string; title: string; done: boolean }[];
-  comments: { id: string; body: string; createdAt: string; user: { id: string; name: string } }[];
-  attachments: { id: string; name: string; size: number; mime: string; createdAt: string; uploadedBy: string }[];
+  comments: { id: string; body: string; createdAt: string; user: { id: string; name: string }; canDelete: boolean }[];
+  attachments: { id: string; name: string; size: number; mime: string; createdAt: string; uploadedBy: string; canDelete: boolean }[];
+  history: TaskHistoryEntry[];
 }
 
 export interface Meeting {

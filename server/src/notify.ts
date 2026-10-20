@@ -4,7 +4,7 @@ import { emitTo } from './realtime.js';
 
 export interface NotifyInput {
   userId: string;
-  type: 'assigned' | 'mention' | 'due_soon' | 'due_today' | 'overdue' | 'meeting' | 'meeting_reminder' | 'project' | 'dm' | 'system';
+  type: 'assigned' | 'mention' | 'due_soon' | 'due_today' | 'overdue' | 'meeting' | 'meeting_reminder' | 'project' | 'dm' | 'task' | 'security' | 'system';
   title: string;
   body?: string;
   link?: string;

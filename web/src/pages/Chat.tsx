@@ -242,7 +242,7 @@ export function ChatPanel({ channelId, active, onBack }: PanelProps) {
                   <span className="rounded-full bg-white px-3 py-0.5 text-xs font-semibold text-slate ring-1 ring-line">{formatDay(m.createdAt)}</span>
                 </div>
               )}
-              <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : ''} ${grouped ? '' : 'mt-2'}`}>
+              <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : ''} ${grouped ? '' : 'mt-2'} ${Date.now() - Date.parse(m.createdAt) < 4000 ? 'msg-in' : ''}`}>
                 {!mine && (grouped ? <span className="w-8 shrink-0" /> : <Avatar name={m.user.name} size={32} />)}
                 <div
                   className={`max-w-[82%] rounded-2xl px-3 py-2 text-[15px] leading-snug shadow-sm md:max-w-[70%] ${

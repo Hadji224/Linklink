@@ -246,12 +246,12 @@ filesApi.get('/files/:id/preview', (req, res) => {
   fs.createReadStream(p).pipe(res);
 });
 
-// Matrice : Super Admin → tout ; Fondateur → ses propres fichiers ; Invité → rien.
+// Matrice v1.1 : chacun supprime ses propres fichiers (y compris ses pièces jointes de tâche) ; le Super Admin supprime tout.
 filesApi.delete('/files/:id', (req, res) => {
   const f = fileForRead(req, idParam(req));
   const user = me(req);
-  if (!(user.role === 'admin' || (user.role === 'member' && f.user_id === user.id))) {
-    throw new HttpError(403, user.role === 'guest' ? "Les invités ne peuvent pas supprimer de fichiers." : "Vous ne pouvez supprimer que vos propres fichiers.");
+  if (!(user.role === 'admin' || f.user_id === user.id)) {
+    throw new HttpError(403, 'Vous ne pouvez supprimer que vos propres fichiers.');
   }
   const projectId = folderProjectId(f.folder_id);
   if (projectId) projectForWrite(user, projectId);

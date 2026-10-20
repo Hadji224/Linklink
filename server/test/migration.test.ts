@@ -64,3 +64,31 @@ describe('Migration v1 → v2', () => {
     expect((await c.get('/meetings')).data.meetings.map((m: any) => m.title)).toContain('Vieux RDV');
   });
 });
+
+describe('Migration v2 → v3 (droits sur les tâches)', () => {
+  it("une base v2 existante gagne l'archivage, l'historique et les index sans perdre ses tâches", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linklink-mig3-'));
+    let s = await startServer(dir);
+    const c = await new Client(s.url).register('Admin', 'admin@t.test');
+    const pid = (await c.post('/projects', { name: 'Projet v2' })).data.project.id;
+    const tid = (await c.post('/tasks', { projectId: pid, title: 'Tâche existante', assigneeId: c.user.id })).data.task.id;
+    await s.stop();
+    // On remet la base dans l'état d'une v2 : sans archived_at, sans historique, sans déclencheurs.
+    const db = new DatabaseSync(path.join(dir, 'linklink.db'));
+    db.exec(`DROP TRIGGER task_history_immutable; DROP TRIGGER task_comments_immutable; DROP TABLE task_history;
+      DROP INDEX idx_tasks_creator; DROP INDEX idx_tasks_status; DROP INDEX idx_tasks_due; DROP INDEX idx_comments_task;
+      ALTER TABLE tasks DROP COLUMN archived_at; PRAGMA user_version = 2;`);
+    db.close();
+    s = srv = await startServer(dir);
+    const c2 = new Client(s.url);
+    const login = await c2.post('/auth/login', { email: 'admin@t.test', password: 'motdepasse123' });
+    c2.token = login.data.token;
+    const t = (await c2.get(`/tasks/${tid}`)).data.task;
+    expect(t.title).toBe('Tâche existante');
+    expect(t.myRole).toBe('admin'); // le premier compte est Super Admin
+    expect((await c2.patch(`/tasks/${tid}`, { priority: 'urgent' })).data.task.history).toHaveLength(1);
+    const after = new DatabaseSync(path.join(dir, 'linklink.db'));
+    expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(3);
+    after.close();
+  });
+});

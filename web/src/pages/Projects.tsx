@@ -5,7 +5,7 @@ import { useApp } from '../data';
 import { formatDateTime } from '../format';
 import { go } from '../route';
 import { STATUS_LABEL, TASK_STATUS_LABEL, type ActivityItem, type Project, type ProjectStatus, type Task } from '../types';
-import { Avatar, Empty, ErrorNote, Field, Icon, Modal, PageHeader, ProgressBar, RoleChip, Spinner, StatusChip, Tabs, useConfirm, useToast } from '../ui';
+import { Avatar, AvatarStack, Empty, ErrorNote, Field, Icon, Modal, PageHeader, ProgressBar, RoleChip, Spinner, StatusChip, Tabs, useConfirm, useToast } from '../ui';
 import { ChatPanel } from './Chat';
 import { FileBrowser } from './Documents';
 import { MeetingList } from './Meetings';
@@ -104,10 +104,7 @@ function ProjectCard({ p, list }: { p: Project; list: boolean }) {
         <div className={list ? 'w-full sm:w-64' : 'mt-3'}>
           <div className="mb-1 flex justify-between text-xs font-semibold text-slate"><span>{p.tasksDone}/{p.tasksTotal} tâches</span><span>{p.progress}%</span></div>
           <ProgressBar value={p.progress} color={p.color} label={`Progression de ${p.name}`} />
-          <div className="mt-3 flex -space-x-2">
-            {p.members.slice(0, 5).map((m) => <span key={m.id} className="rounded-full ring-2 ring-white"><Avatar name={m.name} size={26} /></span>)}
-            {p.members.length > 5 && <span className="flex h-[26px] w-[26px] items-center justify-center rounded-full bg-mist text-[10px] font-bold ring-2 ring-white">+{p.members.length - 5}</span>}
-          </div>
+          <div className="mt-3"><AvatarStack names={p.members.map((m) => m.name)} max={5} size={26} /></div>
         </div>
       </div>
     </a>

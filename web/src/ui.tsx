@@ -1,5 +1,6 @@
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
+  cloneElement, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState,
+  type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode,
 } from 'react';
 import { initials } from './format';
 import {
@@ -39,7 +40,7 @@ export function Avatar({ name, size = 36, online }: { name: string; size?: numbe
 export function ErrorNote({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+    <p role="alert" className="rounded-lg border border-danger/30 bg-danger-bg px-3 py-2 text-sm font-medium text-danger-ink">
       {children}
     </p>
   );
@@ -54,11 +55,40 @@ export function Spinner({ label = 'Chargement…' }: { label?: string }) {
   );
 }
 
-export function Empty({ children, action }: { children: ReactNode; action?: ReactNode }) {
+/* ---------------- D5.4 Squelettes : jamais un spinner seul sur une liste ---------------- */
+
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`skeleton ${className}`} aria-hidden />;
+}
+
+/** Reproduit la structure d'une liste de cartes pendant le chargement. */
+export function SkeletonList({ rows = 4, label = 'Chargement…' }: { rows?: number; label?: string }) {
   return (
-    <div className="py-10 text-center text-sm text-slate">
-      <p>{children}</p>
-      {action && <div className="mt-3">{action}</div>}
+    <div role="status" aria-busy="true" className="space-y-3 p-3">
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="card flex items-center gap-3 p-3">
+          <Skeleton className="h-10 w-10 shrink-0 !rounded-xl" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-3/5" />
+            <Skeleton className="h-3 w-4/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** D5.3 : une liste vide n'est pas une erreur — icône, message clair et, si possible, une action. */
+export function Empty({ children, action, icon = 'folder', title }: { children: ReactNode; action?: ReactNode; icon?: IconName; title?: string }) {
+  return (
+    <div className="flex flex-col items-center px-4 py-10 text-center">
+      <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-electric/10 text-electric" aria-hidden>
+        <Icon name={icon} className="h-7 w-7" />
+      </span>
+      {title && <p className="font-bold text-navy">{title}</p>}
+      <p className="mt-1 max-w-sm text-sm text-slate">{children}</p>
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
@@ -72,7 +102,7 @@ export function PageHeader({ title, children, back }: { title: string; children?
             ← {back.label}
           </a>
         )}
-        <h1 className="truncate text-lg font-bold text-navy">{title}</h1>
+        <h1 className="t-h1 truncate !text-xl md:!text-2xl">{title}</h1>
       </div>
       <div className="flex flex-wrap items-center gap-2">{children}</div>
     </header>
@@ -94,23 +124,20 @@ export function ProgressBar({ value, color = '#135fea', label }: { value: number
   );
 }
 
-const CHIP = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap';
+const CHIP = 'badge';
 
 const PROJECT_STATUS_STYLE: Record<ProjectStatus, string> = {
-  active: 'bg-emerald-50 text-emerald-800',
-  paused: 'bg-amber-50 text-amber-900',
-  done: 'bg-blue-50 text-blue-800',
-  archived: 'bg-slate-100 text-slate-700',
+  active: 'bd-success',
+  paused: 'bd-warning',
+  done: 'bd-electric',
+  archived: 'bd-slate',
 };
 export const StatusChip = ({ status }: { status: ProjectStatus }) => <span className={`${CHIP} ${PROJECT_STATUS_STYLE[status]}`}>{STATUS_LABEL[status]}</span>;
 
 export const PRIORITY_EMOJI: Record<Priority, string> = { urgent: '🔴', high: '🟠', medium: '🟡', low: '🟢' };
-const PRIORITY_STYLE: Record<Priority, string> = {
-  urgent: 'bg-red-50 text-red-800',
-  high: 'bg-orange-50 text-orange-900',
-  medium: 'bg-yellow-50 text-yellow-900',
-  low: 'bg-emerald-50 text-emerald-800',
-};
+const PRIORITY_STYLE: Record<Priority, string> = { urgent: 'bd-danger', high: 'bd-warning', medium: 'bd-electric', low: 'bd-success' };
+/** Couleur d'accent d'une priorité (bord gauche des cartes de tâche, D4.4). */
+export const PRIORITY_COLOR: Record<Priority, string> = { urgent: '#ef4444', high: '#f59e0b', medium: '#135fea', low: '#22c55e' };
 export const PriorityChip = ({ priority }: { priority: Priority }) => (
   <span className={`${CHIP} ${PRIORITY_STYLE[priority]}`}>
     <span aria-hidden>{PRIORITY_EMOJI[priority]}</span>
@@ -118,20 +145,10 @@ export const PriorityChip = ({ priority }: { priority: Priority }) => (
   </span>
 );
 
-const TASK_STATUS_STYLE: Record<TaskStatus, string> = {
-  todo: 'bg-slate-100 text-slate-800',
-  doing: 'bg-blue-50 text-blue-800',
-  review: 'bg-violet-50 text-violet-800',
-  done: 'bg-emerald-50 text-emerald-800',
-};
+export const TASK_STATUS_STYLE: Record<TaskStatus, string> = { todo: 'bd-warning', doing: 'bd-electric', review: 'bd-cyan', done: 'bd-success' };
 export const TaskStatusChip = ({ status }: { status: TaskStatus }) => <span className={`${CHIP} ${TASK_STATUS_STYLE[status]}`}>{TASK_STATUS_LABEL[status]}</span>;
 
-const LEVEL_STYLE: Record<Level, string> = {
-  public: 'bg-emerald-50 text-emerald-800',
-  internal: 'bg-blue-50 text-blue-800',
-  confidential: 'bg-amber-50 text-amber-900',
-  strict: 'bg-red-50 text-red-800',
-};
+const LEVEL_STYLE: Record<Level, string> = { public: 'bd-success', internal: 'bd-electric', confidential: 'bd-warning', strict: 'bd-danger' };
 export const LevelChip = ({ level }: { level: Level }) => (
   <span className={`${CHIP} ${LEVEL_STYLE[level]}`} title={LEVEL_LABEL[level]}>
     {level === 'strict' || level === 'confidential' ? '🔒 ' : ''}
@@ -139,8 +156,13 @@ export const LevelChip = ({ level }: { level: Level }) => (
   </span>
 );
 
-const ROLE_STYLE: Record<Role, string> = { admin: 'bg-navy text-white', member: 'bg-blue-50 text-blue-800', guest: 'bg-slate-100 text-slate-700' };
+const ROLE_STYLE: Record<Role, string> = { admin: 'bd-solid-navy', member: 'bd-navy', guest: 'bd-cyan' };
 export const RoleChip = ({ role }: { role: Role }) => <span className={`${CHIP} ${ROLE_STYLE[role]}`}>{ROLE_LABEL[role]}</span>;
+
+/** D4.2 — présence : en ligne / hors ligne (pastille + texte, jamais la couleur seule). */
+export const PresenceBadge = ({ online }: { online: boolean }) => (
+  <span className={`${CHIP} bd-dot ${online ? 'bd-success' : 'bd-navy'}`}>{online ? 'En ligne' : 'Hors ligne'}</span>
+);
 
 export function Badge({ n, className = '' }: { n: number; className?: string }) {
   if (n <= 0) return null;
@@ -184,6 +206,10 @@ const PATHS = {
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   clock: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
   lock: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z',
+  archive: 'M4 5h16v4H4zM6 9v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9M10 13h4',
+  history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
+  transfer: 'M7 7h13m-4-4 4 4-4 4M17 17H4m4-4-4 4 4 4',
+  sidebar: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM9 5v14',
 } as const;
 export type IconName = keyof typeof PATHS;
 
@@ -220,9 +246,80 @@ export function FileIcon({ name, mime, size = 36 }: { name: string; mime: string
   );
 }
 
-/* ---------------------------------- Toasts ---------------------------------- */
+/* ---------------------------------- Boutons (D4.1, D5.1) ---------------------------------- */
 
-interface ToastItem { id: number; kind: 'success' | 'error' | 'info'; text: string }
+type Variant = 'primary' | 'cyan' | 'ghost' | 'ghost-dark' | 'danger' | 'danger-solid';
+const VARIANT_CLASS: Record<Variant, string> = {
+  primary: 'btn-primary', cyan: 'btn-cyan', ghost: 'btn-ghost', 'ghost-dark': 'btn-ghost-dark', danger: 'btn-danger', 'danger-solid': 'btn-danger-solid',
+};
+
+/** Les 5 états : repos, survol, focus, désactivé, chargement (spinner + « Patientez… »). */
+export function Button({
+  variant = 'primary', size = 'md', loading = false, loadingLabel = 'Patientez…', className = '', children, disabled, ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; loading?: boolean; loadingLabel?: string }) {
+  return (
+    <button
+      {...rest}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      className={`btn ${VARIANT_CLASS[variant]} ${size === 'sm' ? 'btn-sm' : size === 'lg' ? 'btn-lg' : ''} ${className}`}
+    >
+      {loading ? loadingLabel : children}
+    </button>
+  );
+}
+
+/* --------------------------------- Case à cocher animée --------------------------------- */
+
+export function CheckBox({ checked, onChange, disabled, label, id }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string; id?: string }) {
+  return (
+    <span className="cb">
+      <input type="checkbox" id={id} checked={checked} disabled={disabled} aria-label={label} onChange={(e) => onChange(e.target.checked)} />
+      <span className="cb-box" aria-hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
+          <path className="cb-tick" d="m5 12.5 4.5 4.5L19 7.5" />
+        </svg>
+      </span>
+    </span>
+  );
+}
+
+/* ----------------------------------- Info-bulle ----------------------------------- */
+
+export function Tooltip({ label, children, below = false }: { label: string; children: ReactElement<{ 'aria-describedby'?: string }>; below?: boolean }) {
+  const id = useId();
+  return (
+    <span className={`tt ${below ? 'tt-below' : ''}`}>
+      {cloneElement(children, { 'aria-describedby': id })}
+      <span role="tooltip" id={id} className="tt-bubble">{label}</span>
+    </span>
+  );
+}
+
+/* ------------------------------- Pile d'avatars ------------------------------- */
+
+export function AvatarStack({ names, max = 4, size = 28 }: { names: string[]; max?: number; size?: number }) {
+  const shown = names.slice(0, max);
+  const extra = names.length - shown.length;
+  return (
+    <span className="inline-flex items-center" role="img" aria-label={`${names.length} membre${names.length > 1 ? 's' : ''} : ${names.join(', ')}`}>
+      {shown.map((n, i) => (
+        <span key={`${n}-${i}`} className="rounded-full ring-2 ring-white" style={{ marginLeft: i ? -size * 0.3 : 0 }}>
+          <Avatar name={n} size={size} />
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className="inline-flex items-center justify-center rounded-full bg-cloud-deep text-[11px] font-bold text-navy ring-2 ring-white" style={{ marginLeft: -size * 0.3, width: size, height: size }} aria-hidden>
+          +{extra}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* ---------------------------------- Toasts (D5.2, D6.1) ---------------------------------- */
+
+interface ToastItem { id: number; kind: 'success' | 'error' | 'info'; text: string; leaving?: boolean }
 interface ToastApi { success: (t: string) => void; error: (t: string) => void; info: (t: string) => void }
 const ToastContext = createContext<ToastApi | null>(null);
 
@@ -232,19 +329,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((kind: ToastItem['kind'], text: string) => {
     const id = ++counter.current;
     setItems((l) => [...l.filter((t) => t.kind !== kind).slice(-1), { id, kind, text }]); // un seul message par type, pour ne pas masquer l'écran
-    setTimeout(() => setItems((l) => l.filter((t) => t.id !== id)), kind === 'error' ? 6000 : 2800);
+    // Disparition automatique : 3 s (6 s pour une erreur), sortie en 150 ms.
+    setTimeout(() => setItems((l) => l.map((t) => (t.id === id ? { ...t, leaving: true } : t))), kind === 'error' ? 6000 : 3000);
+    setTimeout(() => setItems((l) => l.filter((t) => t.id !== id)), kind === 'error' ? 6150 : 3150);
   }, []);
   const api = useMemo<ToastApi>(() => ({ success: (t) => push('success', t), error: (t) => push('error', t), info: (t) => push('info', t) }), [push]);
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 md:bottom-6">
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:items-end sm:px-0">
         {items.map((t) => (
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto max-w-md animate-[toast-in_0.2s_ease-out] rounded-xl px-4 py-2.5 text-sm font-medium text-white shadow-lg ${
-              t.kind === 'error' ? 'bg-[#b42318]' : t.kind === 'success' ? 'bg-navy' : 'bg-electric-dark'
+            style={{ animation: `${t.leaving ? 'toast-out 150ms' : 'toast-in 200ms'} var(--ease-out) forwards` }}
+            className={`pointer-events-auto max-w-md rounded-xl px-4 py-2.5 text-sm font-medium text-white shadow-lg ${
+              t.kind === 'error' ? 'bg-[#b91c1c]' : t.kind === 'success' ? 'bg-success-ink' : 'bg-electric-deep'
             }`}
           >
             {t.kind === 'success' && '✓ '}
@@ -262,21 +362,26 @@ export function useToast() {
   return ctx;
 }
 
-/* ---------------------------- Fenêtre modale / feuille ---------------------------- */
+/* ------------------- Fenêtre modale, panneau latéral : comportement commun ------------------- */
 
-export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
+// Pile de fenêtres ouvertes : seule celle du dessus réagit à Échap et à Tab (une confirmation au-dessus d'un panneau, par exemple).
+const dialogStack: symbol[] = [];
+
+function useDialog(ref: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
   // onClose est lu via une référence : un re-rendu du parent ne doit ni redonner le focus ni relancer l'effet.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
+    const me = Symbol('dialog');
+    dialogStack.push(me);
     const previous = document.activeElement as HTMLElement | null;
-    const first = ref.current?.querySelector<HTMLElement>('input,textarea,select,button:not([data-close])');
+    const first = ref.current?.querySelector<HTMLElement>('input:not(:disabled),textarea:not(:disabled),select:not(:disabled),button:not([data-close]):not(:disabled)');
     (first ?? ref.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (dialogStack[dialogStack.length - 1] !== me) return;
       if (e.key === 'Escape') closeRef.current();
       if (e.key === 'Tab' && ref.current) {
-        const f = [...ref.current.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),textarea,select,[tabindex]:not([tabindex="-1"])')];
+        const f = [...ref.current.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex]:not([tabindex="-1"])')];
         if (!f.length) return;
         const a = f[0] as HTMLElement, b = f[f.length - 1] as HTMLElement;
         if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); }
@@ -287,23 +392,29 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      dialogStack.splice(dialogStack.indexOf(me), 1);
+      if (!dialogStack.length) document.body.style.overflow = '';
       previous?.focus();
     };
-  }, []);
+  }, [ref]);
+}
+
+export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialog(ref, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy/50 md:items-center md:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="backdrop fixed inset-0 z-50 flex items-end justify-center md:items-center md:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={`flex max-h-[92dvh] w-full animate-[sheet-in_0.2s_ease-out] flex-col rounded-t-3xl bg-white shadow-2xl md:rounded-3xl ${wide ? 'md:max-w-3xl' : 'md:max-w-lg'}`}
+        className={`sheet flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white md:rounded-3xl ${wide ? 'md:max-w-3xl' : 'md:max-w-lg'}`}
       >
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button data-close onClick={onClose} className="rounded-lg p-2 text-slate hover:bg-mist" aria-label="Fermer">
+          <h2 className="t-h4">{title}</h2>
+          <button data-close onClick={onClose} className="icon-btn" aria-label="Fermer">
             <Icon name="x" />
           </button>
         </div>
@@ -313,7 +424,102 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
   );
 }
 
-/* ------------------------------ Confirmation ------------------------------ */
+/** D4.5 — panneau latéral coulissant : consulter ou modifier un élément sans quitter la page. */
+export function Drawer({ title, onClose, children, actions, subtitle }: { title: string; onClose: () => void; children: ReactNode; actions?: ReactNode; subtitle?: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialog(ref, onClose);
+  return (
+    <div className="backdrop fixed inset-0 z-50 flex justify-end" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className="drawer flex h-full w-full flex-col bg-white sm:max-w-xl sm:rounded-l-3xl lg:max-w-2xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="t-h4 truncate">{title}</h2>
+            {subtitle && <div className="mt-0.5 text-sm text-slate">{subtitle}</div>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {actions}
+            <button data-close onClick={onClose} className="icon-btn" aria-label="Fermer le panneau">
+              <Icon name="x" />
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------- Menu déroulant (D4.5) -------------------------------- */
+
+export interface MenuItem { label: string; icon?: IconName; onSelect: () => void; danger?: boolean; disabled?: boolean }
+
+export function Menu({ label, items, icon = 'more' }: { label: string; items: MenuItem[]; icon?: IconName }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useEffect(() => {
+    if (!open) return;
+    panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    const away = (e: MouseEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
+  const close = (refocus = true) => { setOpen(false); if (refocus) trigger.current?.focus(); };
+  const onKey = (e: ReactKeyboardEvent) => {
+    const list = [...(panel.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    const go = (i: number) => { e.preventDefault(); list[(i + list.length) % list.length]?.focus(); };
+    if (e.key === 'ArrowDown') go(at + 1);
+    else if (e.key === 'ArrowUp') go(at - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(list.length - 1);
+    else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    else if (e.key === 'Tab') close(false);
+  };
+  return (
+    <span ref={root} className="relative inline-flex">
+      <button
+        ref={trigger}
+        className="icon-btn"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}
+      >
+        <Icon name={icon} />
+      </button>
+      {open && (
+        <div ref={panel} id={id} role="menu" aria-label={label} className="menu-panel" onKeyDown={onKey}>
+          {items.map((it) => (
+            <button
+              key={it.label}
+              role="menuitem"
+              disabled={it.disabled}
+              className={`menu-item ${it.danger ? 'menu-item-danger' : ''}`}
+              onClick={() => { close(false); it.onSelect(); }}
+            >
+              {it.icon && <Icon name={it.icon} className="h-4 w-4" />}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/* ------------------------------ Confirmation (D5.2 : action irréversible) ------------------------------ */
 
 interface ConfirmOptions { title: string; message?: string; confirmLabel?: string; danger?: boolean }
 type ConfirmFn = (o: ConfirmOptions) => Promise<boolean>;
@@ -356,7 +562,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs:
           role="tab"
           aria-selected={value === t.id}
           onClick={() => onChange(t.id)}
-          className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-semibold ${value === t.id ? 'border-electric text-electric' : 'border-transparent text-slate hover:text-navy'}`}
+          className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${value === t.id ? 'border-electric text-electric' : 'border-transparent text-slate hover:text-navy'}`}
         >
           {t.label}
           {t.badge ? <Badge n={t.badge} /> : null}
@@ -366,12 +572,13 @@ export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs:
   );
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+/** Étiquette toujours visible (jamais de placeholder seul). `error` : message sous le champ, lu par les lecteurs d'écran. */
+export function Field({ label, children, hint, error }: { label: string; children: ReactNode; hint?: string; error?: string }) {
   return (
     <label className="block">
-      <span className="label">{label}</span>
+      <span className={`label ${error ? 'label-error' : ''}`}>{label}</span>
       <div className="mt-1">{children}</div>
-      {hint && <span className="mt-1 block text-xs text-slate">{hint}</span>}
+      {error ? <span role="alert" className="mt-1 block text-xs font-medium text-danger-ink">{error}</span> : hint && <span className="mt-1 block text-xs text-slate">{hint}</span>}
     </label>
   );
 }

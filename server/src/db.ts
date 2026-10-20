@@ -246,6 +246,41 @@ if (version < 2) {
     throw e;
   }
 }
+// v3 — amendement v1.1 (droits d'écriture sur les tâches) : archivage, historique immuable, index.
+if (version < 3) {
+  db.exec('BEGIN');
+  try {
+    const cols = all('PRAGMA table_info(tasks)').map((c) => c['name']);
+    if (!cols.includes('archived_at')) db.exec('ALTER TABLE tasks ADD COLUMN archived_at TEXT');
+    db.exec(`
+CREATE TABLE IF NOT EXISTS task_history (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  user_name  TEXT NOT NULL DEFAULT '',
+  field      TEXT NOT NULL,
+  old_value  TEXT,
+  new_value  TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_history_task ON task_history(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(created_by);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id, created_at);
+-- Règles du cahier : l'historique et les commentaires ne sont jamais modifiés (seulement ajoutés ou supprimés).
+CREATE TRIGGER IF NOT EXISTS task_history_immutable BEFORE UPDATE OF task_id, field, old_value, new_value, created_at ON task_history
+BEGIN SELECT RAISE(ABORT, 'Historique immuable'); END;
+CREATE TRIGGER IF NOT EXISTS task_comments_immutable BEFORE UPDATE ON task_comments
+BEGIN SELECT RAISE(ABORT, 'Un commentaire ne peut pas être modifié'); END;
+`);
+    db.exec('PRAGMA user_version = 3');
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
 db.exec('PRAGMA foreign_keys = ON;');
 
 function importV1(old: Record<string, Row[]>) {

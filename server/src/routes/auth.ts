@@ -6,6 +6,7 @@ import { logActivity } from '../activity.js';
 import { db, getSetting, newInviteCode, now, setSetting, tx, uid, type Role, type UserRow } from '../db.js';
 import { HttpError, idParam, me, parse } from '../http.js';
 import { disconnectUser, emitAll, onlineUserIds } from '../realtime.js';
+import { handOverTasksOf } from '../taskrules.js';
 import { removeStored } from '../uploads.js';
 
 export const publicApi = Router();
@@ -137,7 +138,9 @@ accountApi.get('/me/export', (req, res) => {
 
 export function eraseUser(userId: string) {
   const stored = (db.prepare('SELECT stored_name FROM files WHERE user_id = ?').all(userId) as { stored_name: string }[]).map((f) => f.stored_name);
+  const name = (db.prepare('SELECT name FROM users WHERE id = ?').get(userId) as { name: string } | undefined)?.name ?? 'Ancien membre';
   tx(() => {
+    handOverTasksOf(userId, name); // tâches créées → propriété admin ; tâches assignées → non assignées
     db.prepare("UPDATE activity_log SET user_name = 'Compte supprimé', user_id = NULL WHERE user_id = ?").run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId); // cascade : messages, fichiers, commentaires, notifications…
   });
