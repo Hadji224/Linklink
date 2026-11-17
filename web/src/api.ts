@@ -1,5 +1,8 @@
 const TOKEN_KEY = 'linklink_token';
 
+/** Adresse du serveur quand l'interface est hébergée à part (ex. Vercel → Render). Vide = même origine. */
+export const API_BASE = String(import.meta.env.VITE_API_URL ?? '').trim().replace(/\/+$/, '');
+
 export function getToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY);
@@ -49,7 +52,7 @@ async function rawRequest(path: string, { method = 'GET', body, form }: Options 
   }
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: payload });
+    res = await fetch(`${API_BASE}/api${path}`, { method, headers, body: payload });
   } catch {
     throw new ApiError(0, 'Impossible de joindre le serveur. Vérifiez votre connexion.');
   }

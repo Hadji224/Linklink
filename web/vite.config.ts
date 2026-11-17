@@ -10,7 +10,7 @@ try { commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe'
 // En développement, les appels /api et /ws sont renvoyés vers le serveur (port 3000).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  define: { __APP_VERSION__: JSON.stringify(`v1.1 · ${commit}`) },
+  define: { __APP_VERSION__: JSON.stringify(`v1.2 · ${commit}`) },
   server: {
     host: true,
     port: 5173,

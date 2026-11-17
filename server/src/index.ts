@@ -31,6 +31,25 @@ app.use((_req, res, next) => {
   next();
 });
 
+// Interface hébergée ailleurs (ex. Vercel) : CORS_ORIGIN = liste d'origines autorisées, séparées par des virgules.
+// Pas de cookies (jeton en en-tête Authorization) : aucun risque CSRF, seules les origines listées lisent les réponses.
+const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? '').split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+if (CORS_ORIGINS.length) {
+  app.use('/api', (req, res, next) => {
+    const origin = req.header('origin');
+    if (origin && CORS_ORIGINS.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Expose-Headers', 'content-disposition');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+    if (req.method === 'OPTIONS') return void res.status(204).end();
+    next();
+  });
+}
+
 app.use('/api', express.json({ limit: '100kb' }), api);
 app.use(errorHandler);
 
@@ -51,6 +70,6 @@ server.listen(PORT, () => {
   console.log(`LinkLink : http://localhost:${PORT}`);
   console.log(`Code d'invitation (Fondateurs) : ${getSetting('invite_code')}`);
   console.log(`Code d'invitation (Invités internes) : ${getSetting('guest_invite_code')}`);
-  console.log('(Le tout premier compte créé devient Super Admin.)');
+  console.log("(Le tout premier compte créé devient Administrateur technique, PDG de démarrage.)");
   startJobs();
 });

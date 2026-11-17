@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getToken } from './api';
+import { API_BASE, getToken } from './api';
 import type { RealtimeEvent } from './types';
 
 type Listener = (event: RealtimeEvent) => void;
@@ -27,8 +27,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       const token = getToken();
       if (!token || stopped) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      socket = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+      const base = API_BASE ? new URL(API_BASE) : location;
+      const proto = base.protocol === 'https:' ? 'wss' : 'ws';
+      socket = new WebSocket(`${proto}://${base.host}/ws?token=${encodeURIComponent(token)}`);
       socket.onopen = () => {
         attempt = 0;
         setConnected(true);

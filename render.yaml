@@ -1,7 +1,7 @@
 # Déploiement Render : https://render.com → New → Blueprint → choisir ce dépôt.
 services:
   - type: web
-    name: linklink
+    name: linklink-api
     runtime: docker
     plan: starter            # un disque persistant exige une offre payante
     healthCheckPath: /api/health
@@ -16,6 +16,8 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: APP_URL
+        sync: false
+      - key: CORS_ORIGIN       # adresse de l'interface si elle est hébergée à part (ex. https://linklink.vercel.app)
         sync: false
     disk:
       name: linklink-data
