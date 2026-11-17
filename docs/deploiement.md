@@ -4,7 +4,7 @@
 1. Poussez ce dépôt sur GitHub (déjà fait).
 2. Sur [render.com](https://render.com) : **New → Blueprint**, choisissez le dépôt. `render.yaml` crée le service Docker avec un disque persistant `/data`.
 3. Renseignez `APP_URL` (adresse publique). `JWT_SECRET` est généré automatiquement.
-4. Ouvrez l'adresse : créez le premier compte (Super Admin) ; les codes d'invitation sont visibles dans *Équipe*.
+4. Ouvrez l'adresse : créez le premier compte (Administrateur technique) ; les codes d'invitation sont visibles dans *Équipe*.
 
 > Un disque persistant demande une offre payante. Sans disque, les données sont perdues à chaque redéploiement.
 
@@ -34,7 +34,7 @@ Définissez `SMTP_URL` (ex. `smtps://utilisateur:motdepasse@smtp.exemple.com`) e
 Branchez [UptimeRobot](https://uptimerobot.com) (gratuit) sur `https://votre-domaine/api/health` : alerte e-mail si le service ne répond plus. Pour les erreurs applicatives, les messages d'erreur sortent sur la console du serveur (`docker logs linklink`).
 
 ## Journaux
-`DATA_DIR/logs/access-AAAA-MM.log` (une ligne JSON par requête, sans contenu) ; purgés après 12 mois. Lisibles par le Super Admin via `GET /api/admin/access-logs`. Le journal d'activité applicatif est dans l'écran *Journal*.
+`DATA_DIR/logs/access-AAAA-MM.log` (une ligne JSON par requête, sans contenu) ; purgés après 12 mois. Lisibles par l'administrateur technique via `GET /api/admin/access-logs`. Le journal d'activité applicatif est dans l'écran *Journal*.
 
 ## Checklist de mise en production
 - [ ] HTTPS actif (le serveur envoie HSTS quand `NODE_ENV=production`)

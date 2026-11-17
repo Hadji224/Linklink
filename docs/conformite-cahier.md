@@ -14,7 +14,7 @@ Légende : ✅ conforme · 🟡 partiel / écart assumé · ⛔ non fait · 🌐
 | RDV avec RSVP | ✅ | `routes/meetings.ts` |
 | Tableau de bord personnel et global | ✅ | `pages/Dashboard.tsx` |
 | Notifications in-app + e-mail | ✅ | e-mail actif seulement si `SMTP_URL` est configuré (non testé avec un vrai serveur SMTP) |
-| Journal d'activité | ✅ | `activity_log`, écran Journal (Super Admin) |
+| Journal d'activité | ✅ | `activity_log`, écrans Journaux (métier, sécurité, urgence ; immuables) |
 | Code d'invitation | ✅ | + second code pour les invités internes |
 
 ## §4.2 Matrice des permissions
@@ -65,7 +65,7 @@ Légende : ✅ conforme · 🟡 partiel / écart assumé · ⛔ non fait · 🌐
 - Table `clients` (Phase 2) : non créée. ⛔
 
 ## §9 Sécurité
-Authentification, autorisation (`requireAuth`, rôles, contrôles par ressource), protection des données, RGPD, journalisation : ✅. « DPO = le Super Admin » : formulé sans nom dans les CGU.
+Authentification, autorisation (`requireAuth`, rôles, contrôles par ressource), protection des données, RGPD, journalisation : ✅. « DPO = l'administrateur technique » : formulé sans nom dans les CGU.
 
 ## §10 Design
 Palette, Inter (auto-hébergée), rayons 12/16 px, logo officiel (fourni par la charte, jamais redessiné ; symbole seul sur tuile claire), sidebar bleu nuit, barre du bas mobile, composants récurrents : ✅. Le §10.2 du cahier décrit un logo sur fond bleu nuit arrondi ; la charte impose le logo officiel sur fond clair, c'est elle qui a été suivie. Barre du bas : 4 onglets + « Plus » (le cahier prévoyait 4 onglets pour 4 pages ; il y en a maintenant 10).
@@ -139,3 +139,6 @@ Variables d'environnement, Caddy/Nginx, disque persistant, CGU en ligne, test de
 | D7 Contrastes AA (axe-core sans violation), navigation clavier, zones tactiles 44 px, `role="alert"`, `aria-label` | ✅ | test e2e axe |
 | D7.6 Mode sombre | 🟡 | couleurs en variables, activation prévue en V2 comme demandé |
 | D7.7 Test lecteur d'écran (VoiceOver / NVDA) | ⛔ | à faire à la main |
+
+## Spécification fonctionnelle v1.2
+Implémentée sur la base du schéma v4 : fonctions, mandats, finances, communications, projets (responsable, orphelins, archivage en deux temps), tâches (dépendances), relances, journaux immuables, accès d'urgence, transfert d'administration, suspension de compte. Détail, correspondance code/tests et simplifications : [`specification-v1.2.md`](specification-v1.2.md).
