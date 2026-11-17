@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAdmin, requireStaff } from '../auth.js';
+import { requireStaff } from '../auth.js';
+import { audit, can, requireCap } from '../access.js';
 import { logActivity } from '../activity.js';
 import { db, now, today, tx, uid, type Role } from '../db.js';
 import { HttpError, idParam, me, parse, type AuthUser } from '../http.js';
@@ -40,6 +41,10 @@ const userRef = (id: string | null) =>
   id ? ((db.prepare('SELECT id, name FROM users WHERE id = ?').get(id) as { id: string; name: string } | undefined) ?? null) : null;
 const userName = (id: string | null) => userRef(id)?.name ?? null;
 
+const depsOf = (taskId: string) =>
+  db.prepare('SELECT t.id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on WHERE d.task_id = ? ORDER BY d.created_at').all(taskId) as { id: string; title: string; status: string }[];
+const unfinishedDeps = (taskId: string) => depsOf(taskId).filter((d) => d.status !== 'done');
+
 function shapeTask(user: AuthUser, t: TaskRow, detail = false) {
   const project = db.prepare('SELECT id, name, color, status FROM projects WHERE id = ?').get(t.project_id) as { id: string; name: string; color: string; status: string };
   const sub = db.prepare('SELECT COUNT(*) AS total, SUM(done) AS done FROM subtasks WHERE task_id = ?').get(t.id) as { total: number; done: number | null };
@@ -65,6 +70,7 @@ function shapeTask(user: AuthUser, t: TaskRow, detail = false) {
     commentCount: (db.prepare('SELECT COUNT(*) AS n FROM task_comments WHERE task_id = ?').get(t.id) as { n: number }).n,
     attachmentCount: (db.prepare('SELECT COUNT(*) AS n FROM files WHERE task_id = ?').get(t.id) as { n: number }).n,
     // Rôle de l'utilisateur sur CETTE tâche et ce qu'il peut y faire (l'interface s'en sert ; l'API revérifie toujours).
+    blockedBy: unfinishedDeps(t.id).length,
     myRole: taskRole(user, t),
     lock: taskLock(t),
     permissions: projectOpen ? perms : { edit: false, status: false, reassign: false, delete: false, subtask: false, archive: false, unarchive: false },
@@ -72,17 +78,19 @@ function shapeTask(user: AuthUser, t: TaskRow, detail = false) {
   if (!detail) return base;
   return {
     ...base,
+    dependsOn: depsOf(t.id).map((d) => ({ id: d.id, title: d.title, status: d.status })),
+    dependents: (db.prepare('SELECT t.id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.task_id WHERE d.depends_on = ?').all(t.id) as { id: string; title: string; status: string }[]),
     subtasks: (db.prepare('SELECT id, title, done FROM subtasks WHERE task_id = ? ORDER BY position, rowid').all(t.id) as { id: string; title: string; done: number }[]).map((s) => ({ id: s.id, title: s.title, done: s.done === 1 })),
     comments: (
       db
         .prepare('SELECT c.id, c.body, c.created_at, u.id AS uid, u.name FROM task_comments c JOIN users u ON u.id = c.user_id WHERE c.task_id = ? ORDER BY c.created_at')
         .all(t.id) as { id: string; body: string; created_at: string; uid: string; name: string }[]
-    ).map((c) => ({ id: c.id, body: c.body, createdAt: c.created_at, user: { id: c.uid, name: c.name }, canDelete: user.role === 'admin' || c.uid === user.id })),
+    ).map((c) => ({ id: c.id, body: c.body, createdAt: c.created_at, user: { id: c.uid, name: c.name }, canDelete: taskRole(user, t) === 'admin' || c.uid === user.id })),
     attachments: (
       db
         .prepare('SELECT f.id, f.name, f.size, f.mime, f.created_at, f.user_id, u.name AS uname FROM files f JOIN users u ON u.id = f.user_id WHERE f.task_id = ? ORDER BY f.created_at')
         .all(t.id) as { id: string; name: string; size: number; mime: string; created_at: string; user_id: string; uname: string }[]
-    ).map((f) => ({ id: f.id, name: f.name, size: f.size, mime: f.mime, createdAt: f.created_at, uploadedBy: f.uname, canDelete: user.role === 'admin' || f.user_id === user.id })),
+    ).map((f) => ({ id: f.id, name: f.name, size: f.size, mime: f.mime, createdAt: f.created_at, uploadedBy: f.uname, canDelete: taskRole(user, t) === 'admin' || f.user_id === user.id })),
     history: taskHistory(t.id),
   };
 }
@@ -196,6 +204,10 @@ tasksApi.patch('/tasks/:id', (req, res) => {
   if (sent.some((k) => k !== 'status' && k !== 'assigneeId')) requireTaskPermission(user, cur, 'edit', `modifier ${sent.filter((k) => k !== 'status' && k !== 'assigneeId').join(', ')}`);
   if (sent.includes('status')) requireTaskPermission(user, cur, 'status', 'changer le statut');
   if (input.assigneeId !== undefined) assertAssignee(cur.project_id, input.assigneeId);
+  if (input.status === 'done' && cur.status !== 'done') {
+    const open = unfinishedDeps(cur.id);
+    if (open.length) throw new HttpError(409, `Cette tâche dépend de tâches non terminées : ${open.slice(0, 3).map((d) => `« ${d.title} »`).join(', ')}. Terminez-les d'abord.`);
+  }
 
   const next = {
     title: input.title ?? cur.title,
@@ -294,14 +306,15 @@ tasksApi.post('/tasks/:id/unarchive', (req, res) => {
   res.json({ task: shapeTask(user, loadTask(cur.id), true) });
 });
 
-// Transfert de propriété : action réservée au Super Admin (créateur parti, tâche orpheline…).
-tasksApi.post('/tasks/:id/transfer', requireAdmin, (req, res) => {
+// Transfert de propriété : action réservée au PDG et au chef du projet (créateur parti, tâche orpheline…).
+tasksApi.post('/tasks/:id/transfer', (req, res) => {
   const user = me(req);
   const cur = taskForRead(req, idParam(req));
+  if (taskRole(user, cur) !== 'admin') denyTask(user, cur, 'reassign', 'transférer la propriété');
   const { userId } = parse(z.object({ userId: z.string() }), req.body);
   const target = db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(userId) as { id: string; name: string; role: Role } | undefined;
   if (!target) throw new HttpError(404, 'Membre introuvable.');
-  if (target.role === 'guest') throw new HttpError(400, 'Une tâche ne peut être transférée qu\'à un Fondateur ou un Super Admin.');
+  if (target.role === 'guest') throw new HttpError(400, 'Une tâche ne peut être transférée qu\'à un Fondateur.');
   tx(() => {
     db.prepare('UPDATE tasks SET created_by = ?, updated_at = ? WHERE id = ?').run(target.id, now(), cur.id);
     recordHistory(user, cur.id, 'createdBy', userName(cur.created_by) ?? 'Administration', target.name);
@@ -323,6 +336,41 @@ function subtaskTask(req: Parameters<typeof me>[0], attempt: string) {
   requireTaskPermission(me(req), t, 'subtask', attempt);
   return t;
 }
+
+/* ------------------------- Dépendances entre tâches (§9.3) ------------------------- */
+
+function reaches(from: string, target: string, seen = new Set<string>()): boolean {
+  if (from === target) return true;
+  if (seen.has(from)) return false;
+  seen.add(from);
+  return (db.prepare('SELECT depends_on FROM task_dependencies WHERE task_id = ?').all(from) as { depends_on: string }[]).some((r) => reaches(r.depends_on, target, seen));
+}
+
+tasksApi.post('/tasks/:id/dependencies', (req, res) => {
+  const user = me(req);
+  const cur = taskForRead(req, idParam(req));
+  projectForWrite(user, cur.project_id);
+  requireTaskPermission(user, cur, 'edit', 'ajouter une dépendance');
+  const { dependsOn } = parse(z.object({ dependsOn: z.string() }), req.body);
+  const dep = db.prepare('SELECT id, title, project_id FROM tasks WHERE id = ?').get(dependsOn) as { id: string; title: string; project_id: string } | undefined;
+  if (!dep || dep.project_id !== cur.project_id) throw new HttpError(404, 'Tâche prérequise introuvable dans ce projet.');
+  if (dep.id === cur.id) throw new HttpError(400, 'Une tâche ne peut pas dépendre d\'elle-même.');
+  if (reaches(dep.id, cur.id)) throw new HttpError(409, 'Dépendance circulaire refusée : la tâche choisie dépend déjà (directement ou non) de celle-ci.');
+  db.prepare('INSERT OR IGNORE INTO task_dependencies (id,task_id,depends_on,created_by,created_at) VALUES (?,?,?,?,?)').run(uid(), cur.id, dep.id, user.id, now());
+  audit(user, 'business', 'task_dependency', 'task', cur.id, `« ${cur.title} » dépend désormais de « ${dep.title} »`);
+  emitTask(cur);
+  res.status(201).json({ task: shapeTask(user, loadTask(cur.id), true) });
+});
+
+tasksApi.delete('/tasks/:id/dependencies/:depId', (req, res) => {
+  const user = me(req);
+  const cur = taskForRead(req, idParam(req));
+  projectForWrite(user, cur.project_id);
+  requireTaskPermission(user, cur, 'edit', 'retirer une dépendance');
+  db.prepare('DELETE FROM task_dependencies WHERE task_id = ? AND depends_on = ?').run(cur.id, idParam(req, 'depId'));
+  emitTask(cur);
+  res.json({ task: shapeTask(user, loadTask(cur.id), true) });
+});
 
 tasksApi.post('/tasks/:id/subtasks', (req, res) => {
   const cur = taskForRead(req, idParam(req));
@@ -380,7 +428,7 @@ tasksApi.delete('/tasks/:id/comments/:cid', (req, res) => {
   projectForWrite(user, cur.project_id);
   const c = db.prepare('SELECT id, user_id FROM task_comments WHERE id = ? AND task_id = ?').get(idParam(req, 'cid'), cur.id) as { id: string; user_id: string } | undefined;
   if (!c) throw new HttpError(404, 'Commentaire introuvable.');
-  if (user.role !== 'admin' && c.user_id !== user.id) denyTask(user, cur, 'comment', 'supprimer le commentaire de quelqu\'un d\'autre');
+  if (taskRole(user, cur) !== 'admin' && c.user_id !== user.id) denyTask(user, cur, 'comment', 'supprimer le commentaire de quelqu\'un d\'autre');
   db.prepare('DELETE FROM task_comments WHERE id = ?').run(c.id);
   logActivity(user, 'delete', 'comment', c.id, `Commentaire supprimé sur « ${cur.title} »`, cur.project_id);
   emitTask(cur);

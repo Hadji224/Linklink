@@ -2,12 +2,14 @@ import { db, now, uid } from './db.js';
 import { logActivity } from './activity.js';
 import { HttpError, type AuthUser } from './http.js';
 import { notify } from './notify.js';
+import { audit, hasFn, isAvailable, isProjectLead, pdgIds, projectLeadOf } from './access.js';
 
 /**
  * Droits d'écriture sur les tâches (amendement v1.1, §5.3 et §9.6).
- * Le rôle est calculé PAR TÂCHE : créateur, assigné, admin ou observateur.
+ * Le rôle est calculé PAR TÂCHE : responsable (PDG ou chef du projet), coordinateur, créateur, assigné ou observateur.
+ * L'administrateur technique n'a pas de droit de gestion sur le contenu des projets (séparation des pouvoirs, v1.2).
  */
-export type TaskRole = 'admin' | 'creator' | 'assignee' | 'observer';
+export type TaskRole = 'admin' | 'coordinator' | 'creator' | 'assignee' | 'observer';
 export type TaskLock = 'none' | 'locked' | 'archived';
 
 export const LOCK_AFTER_DAYS = 7;
@@ -23,10 +25,11 @@ export interface TaskRules {
   archived_at: string | null;
 }
 
-export function taskRole(user: Pick<AuthUser, 'id' | 'role'>, t: Pick<TaskRules, 'assignee_id' | 'created_by'>): TaskRole {
-  if (user.role === 'admin') return 'admin';
+export function taskRole(user: Pick<AuthUser, 'id' | 'role'>, t: Pick<TaskRules, 'assignee_id' | 'created_by' | 'project_id'>): TaskRole {
+  if (hasFn(user.id, 'pdg') || isProjectLead(user.id, t.project_id)) return 'admin';
   if (t.created_by === user.id) return 'creator'; // créateur = assigné : le rôle le plus permissif l'emporte
   if (t.assignee_id === user.id) return 'assignee';
+  if (hasFn(user.id, 'coordinator') && user.role !== 'guest') return 'coordinator';
   return 'observer';
 }
 
@@ -54,6 +57,7 @@ export function taskPermissions(user: Pick<AuthUser, 'id' | 'role'>, t: TaskRule
   const none: TaskPermissions = { edit: false, status: false, reassign: false, delete: false, subtask: false, archive: false, unarchive: false };
   if (role === 'admin') return { edit: true, status: true, reassign: true, delete: true, subtask: true, archive: lock !== 'archived' && t.status === 'done', unarchive: lock === 'archived' };
   if (role === 'observer' || lock === 'archived') return none;
+  if (role === 'coordinator') return lock === 'locked' ? none : { ...none, edit: true, status: true, reassign: true, subtask: true }; // coordonne, ne supprime ni n'archive
   if (lock === 'locked') return role === 'creator' ? { ...none, status: true } : none; // le créateur peut seulement rouvrir
   if (role === 'creator') return { edit: true, status: true, reassign: true, delete: true, subtask: true, archive: t.status === 'done', unarchive: false };
   return { ...none, status: true, subtask: true }; // assigné
@@ -62,7 +66,7 @@ export function taskPermissions(user: Pick<AuthUser, 'id' | 'role'>, t: TaskRule
 export type TaskAction = keyof TaskPermissions;
 type DenyAction = TaskAction | 'comment';
 
-const READ_ONLY = 'Vous êtes en lecture seule sur cette tâche. Seuls le créateur, l\'assigné (statut) et les admins peuvent la modifier.';
+const READ_ONLY = 'Vous êtes en lecture seule sur cette tâche. Seuls le créateur, l\'assigné (statut), le coordinateur, le chef de projet et le PDG peuvent la modifier.';
 
 function reason(user: AuthUser, t: TaskRules, action: DenyAction): string {
   if (action === 'comment') return "Seul l'auteur du commentaire ou un admin peut le supprimer.";
@@ -87,8 +91,9 @@ function reason(user: AuthUser, t: TaskRules, action: DenyAction): string {
 export function denyTask(user: AuthUser, t: TaskRules, action: DenyAction, attempt: string): never {
   const message = reason(user, t, action);
   logActivity(user, 'denied', 'task', t.id, `Tentative refusée sur « ${t.title} » : ${attempt}`, t.project_id);
+  audit(user, 'security', 'task_denied', 'task', t.id, `Refusé : ${attempt} sur « ${t.title} »`, { result: 'denied' });
   const hour = now().slice(0, 13);
-  const admins = (db.prepare("SELECT id FROM users WHERE role = 'admin'").all() as { id: string }[]).map((a) => a.id);
+  const admins = [...pdgIds(), ...(db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null } | undefined ? [(db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null }).lead_id] : [])].filter((x): x is string => !!x);
   for (const target of new Set([t.created_by, ...admins].filter((x): x is string => !!x && x !== user.id))) {
     notify({
       userId: target,
@@ -135,18 +140,25 @@ export function taskHistory(taskId: string) {
 
 /**
  * À appeler AVANT la suppression d'un compte :
- *  - les tâches qu'il a créées restent actives et passent en propriété admin (notification aux assignés) ;
+ *  - les tâches qu'il a créées restent actives et passent au responsable du projet (notification aux assignés) ;
  *  - les tâches qui lui étaient assignées redeviennent « non assignées » (seul le créateur peut les réassigner).
  */
 export function handOverTasksOf(userId: string, userName: string) {
-  const heir = db.prepare("SELECT id, name FROM users WHERE role = 'admin' AND id <> ? ORDER BY created_at LIMIT 1").get(userId) as { id: string; name: string } | undefined;
+  // Héritier : le responsable du projet s'il est disponible, sinon le PDG, sinon l'administrateur technique.
+  const fallback = pdgIds().find((id) => id !== userId) ?? (db.prepare("SELECT id FROM users WHERE role = 'admin' AND id <> ? ORDER BY created_at LIMIT 1").get(userId) as { id: string } | undefined)?.id;
+  const heirFor = (projectId: string) => {
+    const lead = projectLeadOf(projectId);
+    const id = lead && lead !== userId && isProjectLead(lead, projectId) && isAvailable(lead) ? lead : fallback;
+    return id ? ((db.prepare('SELECT id, name FROM users WHERE id = ?').get(id) as { id: string; name: string } | undefined) ?? null) : null;
+  };
   const system = { id: null, name: 'Système' };
   const created = db.prepare('SELECT id, title, project_id, assignee_id FROM tasks WHERE created_by = ?').all(userId) as { id: string; title: string; project_id: string; assignee_id: string | null }[];
   for (const t of created) {
+    const heir = heirFor(t.project_id);
     db.prepare('UPDATE tasks SET created_by = ?, updated_at = ? WHERE id = ?').run(heir?.id ?? null, now(), t.id);
     recordHistory(system, t.id, 'createdBy', userName, heir?.name ?? 'Administration');
     if (t.assignee_id && t.assignee_id !== userId) {
-      notify({ userId: t.assignee_id, type: 'task', title: `Le créateur de « ${t.title} » a quitté l'équipe`, body: 'La tâche reste active et passe sous la responsabilité des admins.', link: `#projets/${t.project_id}/taches/${t.id}` });
+      notify({ userId: t.assignee_id, type: 'task', title: `Le créateur de « ${t.title} » a quitté l'équipe`, body: 'La tâche reste active et passe sous la responsabilité du responsable du projet.', link: `#projets/${t.project_id}/taches/${t.id}` });
     }
   }
   const assigned = db.prepare('SELECT id, title, project_id, created_by FROM tasks WHERE assignee_id = ?').all(userId) as { id: string; title: string; project_id: string; created_by: string | null }[];

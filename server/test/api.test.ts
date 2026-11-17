@@ -61,16 +61,20 @@ describe('Authentification & rôles (F-AUTH, §4.2)', () => {
 });
 
 describe('Projets (F-PROJ)', () => {
-  it('un invité ne peut pas créer de projet ; un fondateur oui (et devient membre)', async () => {
+  it('un invité et un fondateur sans fonction ne créent pas de projet ; le Coordinateur oui (et devient membre)', async () => {
     expect((await guest.post('/projects', { name: 'Interdit' })).status).toBe(403);
-    const r = await founder.post('/projects', { name: 'Application mobile', description: 'Application Android et API', color: '#11C6D8' });
+    expect((await founder.post('/projects', { name: 'Sans fonction' })).status).toBe(403); // v1.2 : PDG ou Coordinateur
+    // L'administrateur (PDG au démarrage) attribue les fonctions utilisées par la suite des tests.
+    expect((await admin.post('/functions', { userId: founder.user.id, fn: 'coordinator' })).status).toBe(201);
+    expect((await admin.post('/functions', { userId: founder.user.id, fn: 'project_lead' })).status).toBe(201);
+    const r = await founder.post('/projects', { name: 'Application mobile', description: 'Application Android et API', color: '#11C6D8', leadId: founder.user.id });
     expect(r.status).toBe(201);
     projectId = r.data.project.id;
     expect(r.data.project.members.map((m: any) => m.id)).toContain(founder.user.id);
     expect(r.data.project.folderId).toBeTruthy();
     expect(r.data.project.channelId).toBeTruthy();
   });
-  it("seul le Super Admin supprime un projet", async () => {
+  it("seul le PDG supprime un projet", async () => {
     const p = (await founder.post('/projects', { name: 'Jetable' })).data.project;
     expect((await founder.del(`/projects/${p.id}`)).status).toBe(403);
     expect((await admin.del(`/projects/${p.id}`)).status).toBe(200);
@@ -309,13 +313,13 @@ describe("Droits d'écriture sur les tâches (amendement v1.1 §5.3, §9.6, §16
     expect(r.data.task.history.find((h: any) => h.field === 'createdBy')).toMatchObject({ oldValue: 'Créateur C', newValue: 'Observateur O' });
   });
 
-  it("cas limites : créateur qui part → tâches en propriété admin (assignés prévenus) ; assigné qui part → non assignée", async () => {
+  it("cas limites : créateur qui part → tâches au responsable du projet (assignés prévenus) ; assigné qui part → non assignée", async () => {
     const leaver = await new Client(srv.url).register('Partant P', 'leave@t.test', srv.codes.member);
     const mine = (await leaver.post('/tasks', { projectId, title: 'Du partant', assigneeId: assignee.user.id })).data.task;
     const theirs = (await creator.post('/tasks', { projectId, title: 'Confiée au partant', assigneeId: leaver.user.id })).data.task;
     expect((await leaver.del('/me', { password: 'motdepasse123' })).status).toBe(200);
     const orphan = await task(admin, mine.id);
-    expect(orphan.createdBy?.id).toBe(admin.user.id);
+    expect(orphan.createdBy?.id).toBe(founder.user.id); // v1.2 : l'héritier est le responsable du projet (à défaut, le PDG)
     expect(orphan.assignee.id).toBe(assignee.user.id);
     expect((await notifs(assignee)).some((n) => n.title.includes('a quitté'))).toBe(true);
     const freed = await task(creator, theirs.id);
@@ -331,15 +335,25 @@ describe("Droits d'écriture sur les tâches (amendement v1.1 §5.3, §9.6, §16
   });
 });
 
-describe('Archivage (F-PROJ-04)', () => {
-  it("seul un projet terminé s'archive ; un projet archivé est en lecture seule", async () => {
-    const p = (await founder.post('/projects', { name: 'À archiver' })).data.project;
-    expect((await founder.patch(`/projects/${p.id}`, { status: 'archived' })).status).toBe(400);
-    await founder.patch(`/projects/${p.id}`, { status: 'done' });
-    expect((await founder.patch(`/projects/${p.id}`, { status: 'archived' })).status).toBe(200);
+describe('Archivage en deux temps (F-PROJ-04, spécification v1.2 §7)', () => {
+  it("le responsable déclare « terminé » (tâches ouvertes justifiées), le PDG confirme ; un projet archivé est en lecture seule", async () => {
+    const p = (await founder.post('/projects', { name: 'À archiver', leadId: founder.user.id })).data.project;
+    expect((await founder.patch(`/projects/${p.id}`, { status: 'archived' })).status).toBe(400); // plus de statut direct
+    const t = (await founder.post('/tasks', { projectId: p.id, title: 'Reste à faire' })).data.task;
+    const open = await founder.post(`/projects/${p.id}/done`, {});
+    expect(open.status).toBe(409); // tâche ouverte non justifiée
+    expect((await founder.post(`/projects/${p.id}/done`, { notes: [{ taskId: t.id, kind: 'postponed', note: 'Reportée au prochain projet' }] })).data.project.status).toBe('done');
+    expect((await founder.post(`/projects/${p.id}/archive-decision`, { decision: 'approve' })).status).toBe(403); // le responsable ne confirme pas lui-même
+    expect((await admin.post(`/projects/${p.id}/archive-decision`, { decision: 'refuse' })).status).toBe(400); // refus motivé
+    expect((await admin.post(`/projects/${p.id}/archive-decision`, { decision: 'refuse', motive: 'Livrable manquant' })).data.project.status).toBe('active');
+    await founder.patch(`/tasks/${t.id}`, { status: 'done' });
+    expect((await founder.post(`/projects/${p.id}/done`, {})).data.project.status).toBe('done');
+    expect((await admin.post(`/projects/${p.id}/archive-decision`, { decision: 'approve' })).data.project.status).toBe('archived');
     expect((await founder.post('/tasks', { projectId: p.id, title: 'Non' })).status).toBe(409);
     expect((await founder.patch(`/projects/${p.id}`, { name: 'Renommé' })).status).toBe(409);
     expect((await founder.get(`/projects/${p.id}`)).status).toBe(200);
+    expect((await founder.post(`/projects/${p.id}/reopen`, { motive: 'Retour client' })).status).toBe(403); // PDG seulement
+    expect((await admin.post(`/projects/${p.id}/reopen`, { motive: 'Retour client' })).data.project.status).toBe('active');
   });
 });
 
@@ -493,19 +507,38 @@ describe('Journal, RGPD, sécurité', () => {
     expect((await founder.get('/admin/access-logs')).status).toBe(403);
     expect((await founder.get(`/projects/${projectId}/activity`)).data.activity.length).toBeGreaterThan(0);
   });
-  it("promotion d'un fondateur en Super Admin : droits étendus, ancienne session invalidée, rétrogradation", async () => {
+  it("rôles d'accès : l'administration technique est unique, on ne la crée ni ne la retire par simple changement de rôle (D1)", async () => {
     const c = new Client(srv.url);
     await c.register('Promu Test', 'promu@t.test', srv.codes.member);
     expect((await c.get('/activity')).status).toBe(403);
-    expect((await c.post('/channels', { name: 'promu' })).status).toBe(403);
-    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'admin' })).status).toBe(200);
+    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'admin' })).status).toBe(400);
+    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'guest' })).status).toBe(200);
     expect((await c.get('/me')).status).toBe(401); // il doit se reconnecter pour appliquer son nouveau rôle
-    c.token = (await c.post('/auth/login', { email: 'promu@t.test', password: 'motdepasse123' })).data.token;
-    expect((await c.get('/activity')).status).toBe(200);
-    expect((await c.post('/channels', { name: 'promu' })).status).toBe(201);
-    expect((await admin.patch(`/members/${c.user.id}/role`, { role: 'member' })).status).toBe(200);
-    c.token = (await c.post('/auth/login', { email: 'promu@t.test', password: 'motdepasse123' })).data.token;
-    expect((await c.get('/activity')).status).toBe(403);
+  });
+  it("transfert de l'administration technique : demande → validation du PDG → confirmation du successeur → ancien rétrogradé", async () => {
+    const s = await new Client(srv.url).register('Successeur S', 'succ@t.test', srv.codes.member);
+    const req = await admin.post('/admin-transfer', { toUserId: s.user.id, motive: 'Passation de poste' });
+    expect(req.status).toBe(201);
+    // Le PDG de l'équipe est l'administrateur lui-même (démarrage) : un autre fondateur valide, jamais le demandeur ni le successeur.
+    expect((await admin.post(`/admin-transfer/${req.data.transfer.id}/decision`, { decision: 'approve' })).status).toBe(403);
+    expect((await s.post(`/admin-transfer/${req.data.transfer.id}/decision`, { decision: 'approve' })).status).toBe(403);
+    expect((await founder.post(`/admin-transfer/${req.data.transfer.id}/decision`, { decision: 'approve' })).status).toBe(200);
+    s.token = (await s.post('/auth/login', { email: 'succ@t.test', password: 'motdepasse123' })).data.token;
+    expect((await s.get('/me')).data.user.role).toBe('admin');
+    expect((await admin.post(`/admin-transfer/${req.data.transfer.id}/confirm`)).status).toBe(403); // seul le successeur confirme
+    expect((await s.post(`/admin-transfer/${req.data.transfer.id}/confirm`)).status).toBe(200);
+    expect((await admin.get('/me')).status).toBe(401);
+    admin.token = (await admin.post('/auth/login', { email: 'admin@t.test', password: 'motdepasse123' })).data.token;
+    expect((await admin.get('/me')).data.user.role).toBe('member');
+    // Retour à la situation initiale pour la suite des tests.
+    const back = await s.post('/admin-transfer', { toUserId: admin.user.id, motive: 'Retour' });
+    const approver = (await new Client(srv.url).register('Arbitre A', 'arb@t.test', srv.codes.member));
+    expect((await approver.post(`/admin-transfer/${back.data.transfer.id}/decision`, { decision: 'approve' })).status).toBe(200);
+    admin.token = (await admin.post('/auth/login', { email: 'admin@t.test', password: 'motdepasse123' })).data.token;
+    expect((await admin.post(`/admin-transfer/${back.data.transfer.id}/confirm`)).status).toBe(200);
+    s.token = (await s.post('/auth/login', { email: 'succ@t.test', password: 'motdepasse123' })).data.token;
+    admin.token = (await admin.post('/auth/login', { email: 'admin@t.test', password: 'motdepasse123' })).data.token;
+    expect((await admin.get('/me')).data.user.role).toBe('admin');
   });
   it('droit d\'accès : export JSON des données personnelles', async () => {
     const r = await founder.get('/me/export');

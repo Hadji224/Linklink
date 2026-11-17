@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { limitAuthAttempts, requireAdmin, requireAuth, requireStaff, signToken } from '../auth.js';
 import { logActivity } from '../activity.js';
-import { db, getSetting, newInviteCode, now, setSetting, tx, uid, type Role, type UserRow } from '../db.js';
+import { audit, capabilitiesOf, functionsOf, ownFunctions } from '../access.js';
+import { db, ensureBootstrapPdg, getSetting, newInviteCode, now, setSetting, tx, uid, type Role, type UserRow } from '../db.js';
 import { HttpError, idParam, me, parse } from '../http.js';
 import { disconnectUser, emitAll, onlineUserIds } from '../realtime.js';
 import { handOverTasksOf } from '../taskrules.js';
@@ -12,7 +13,7 @@ import { removeStored } from '../uploads.js';
 export const publicApi = Router();
 export const accountApi = Router();
 
-const publicUser = (r: Pick<UserRow, 'id' | 'name' | 'email' | 'role'>) => ({ id: r.id, name: r.name, email: r.email, role: r.role });
+const publicUser = (r: Pick<UserRow, 'id' | 'name' | 'email' | 'role'>) => ({ id: r.id, name: r.name, email: r.email, role: r.role, functions: ownFunctions(r.id) });
 
 const registerSchema = z.object({
   name: z.string().trim().min(1, 'Le nom est obligatoire.').max(80),
@@ -40,7 +41,8 @@ publicApi.post('/auth/register', limitAuthAttempts, (req, res) => {
   db.prepare('INSERT INTO users (id,name,email,password_hash,role,consented_at,created_at) VALUES (?,?,?,?,?,?,?)').run(
     id, input.name, input.email, bcrypt.hashSync(input.password, 10), role, t, t,
   );
-  const user = { id, name: input.name, email: input.email, role };
+  if (isFirst) ensureBootstrapPdg(); // l'administrateur technique tient la fonction PDG tant qu'aucun fondateur ne la reçoit
+  const user = { id, name: input.name, email: input.email, role, functions: ownFunctions(id) };
   logActivity(user, 'register', 'user', id, `${input.name} a rejoint l'équipe (${role})`);
   emitAll({ type: 'members' });
   res.status(201).json({ token: signToken({ id, token_version: 0 }), user });
@@ -56,6 +58,10 @@ publicApi.post('/auth/login', limitAuthAttempts, (req, res) => {
   const row = db.prepare('SELECT * FROM users WHERE email = ?').get(input.email) as unknown as UserRow | undefined;
   if (!row || !bcrypt.compareSync(input.password, row.password_hash)) {
     throw new HttpError(401, 'E-mail ou mot de passe incorrect.');
+  }
+  if (row.suspended_at) {
+    audit({ id: row.id, name: row.name }, 'security', 'login_suspended', 'user', row.id, 'Connexion refusée : compte suspendu', { result: 'denied' });
+    throw new HttpError(403, "Ce compte est suspendu. Contactez le PDG ou l'administrateur technique.");
   }
   res.json({ token: signToken(row), user: publicUser(row) });
 });
@@ -73,7 +79,11 @@ publicApi.get('/health', (_req, res) => {
 
 accountApi.get('/me', (req, res) => {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(me(req).id) as unknown as UserRow;
-  res.json({ user: { ...publicUser(row), emailNotif: row.email_notif === 1, createdAt: row.created_at } });
+  res.json({
+    user: { ...publicUser(row), emailNotif: row.email_notif === 1, createdAt: row.created_at },
+    effectiveFunctions: functionsOf(row.id),
+    can: capabilitiesOf({ id: row.id, role: row.role }),
+  });
 });
 
 accountApi.patch('/me', (req, res) => {
@@ -152,7 +162,7 @@ export function eraseUser(userId: string) {
 function assertNotLastAdmin(userId: string) {
   const u = db.prepare('SELECT role FROM users WHERE id = ?').get(userId) as { role: Role } | undefined;
   if (u?.role === 'admin' && (db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin'").get() as { n: number }).n <= 1) {
-    throw new HttpError(400, 'Il doit rester au moins un Super Admin.');
+    throw new HttpError(400, "Il doit rester un administrateur technique : transférez d'abord l'administration.");
   }
 }
 
@@ -170,8 +180,8 @@ accountApi.delete('/me', limitAuthAttempts, (req, res) => {
 
 accountApi.get('/members', (_req, res) => {
   const online = new Set(onlineUserIds());
-  const rows = db.prepare('SELECT id, name, email, role, created_at FROM users ORDER BY created_at').all() as unknown as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'created_at'>[];
-  res.json({ members: rows.map((r) => ({ ...publicUser(r), createdAt: r.created_at, online: online.has(r.id) })) });
+  const rows = db.prepare('SELECT id, name, email, role, created_at, suspended_at FROM users ORDER BY created_at').all() as unknown as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'created_at' | 'suspended_at'>[];
+  res.json({ members: rows.map((r) => ({ ...publicUser(r), createdAt: r.created_at, online: online.has(r.id), suspended: !!r.suspended_at })) });
 });
 
 accountApi.patch('/members/:id/role', requireAdmin, (req, res) => {
@@ -180,7 +190,9 @@ accountApi.patch('/members/:id/role', requireAdmin, (req, res) => {
   if (id === me(req).id) throw new HttpError(400, 'Vous ne pouvez pas modifier votre propre rôle.');
   const target = db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(id) as { id: string; name: string; role: Role } | undefined;
   if (!target) throw new HttpError(404, 'Membre introuvable.');
-  assertNotLastAdmin(id);
+  if (role === 'admin' || target.role === 'admin') {
+    throw new HttpError(400, "Le rôle d'administrateur technique ne change que par le transfert d'administration (menu Gouvernance).");
+  }
   db.prepare('UPDATE users SET role = ?, token_version = token_version + 1 WHERE id = ?').run(role, id);
   logActivity(me(req), 'role', 'user', id, `Rôle de ${target.name} : ${target.role} → ${role}`);
   disconnectUser(id); // il devra se reconnecter pour appliquer son nouveau rôle

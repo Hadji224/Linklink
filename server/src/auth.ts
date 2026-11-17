@@ -15,10 +15,10 @@ export function userFromToken(token: string | undefined | null): AuthUser | null
     const payload = jwt.verify(token, jwtSecret()) as { sub?: string; tv?: number };
     if (!payload.sub) return null;
     const row = db
-      .prepare('SELECT id, name, email, role, token_version FROM users WHERE id = ?')
-      .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'token_version'> | undefined;
-    // Un changement de mot de passe ou de rôle invalide les anciennes sessions.
-    if (!row || (payload.tv ?? 0) !== row.token_version) return null;
+      .prepare('SELECT id, name, email, role, token_version, suspended_at FROM users WHERE id = ?')
+      .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'token_version' | 'suspended_at'> | undefined;
+    // Un changement de mot de passe ou de rôle invalide les anciennes sessions ; un compte suspendu n'a plus aucun accès.
+    if (!row || row.suspended_at || (payload.tv ?? 0) !== row.token_version) return null;
     return { id: row.id, name: row.name, email: row.email, role: row.role };
   } catch {
     return null;
@@ -47,7 +47,7 @@ export const requireRole =
   };
 
 export const requireAdmin = requireRole('admin');
-/** Super Admin et Fondateurs (tout sauf les invités internes). */
+/** Administrateur technique et Fondateurs (tout sauf les invités). */
 export const requireStaff = requireRole('admin', 'member');
 
 // Limiteur en mémoire contre les essais répétés de mot de passe.

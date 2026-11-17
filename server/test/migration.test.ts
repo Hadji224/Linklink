@@ -88,7 +88,37 @@ describe('Migration v2 → v3 (droits sur les tâches)', () => {
     expect(t.myRole).toBe('admin'); // le premier compte est Super Admin
     expect((await c2.patch(`/tasks/${tid}`, { priority: 'urgent' })).data.task.history).toHaveLength(1);
     const after = new DatabaseSync(path.join(dir, 'linklink.db'));
-    expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(3);
+    expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(4);
+    after.close();
+  });
+});
+
+describe('Migration v3 → v4 (gouvernance, spécification v1.2)', () => {
+  it("une base v3 gagne les fonctions, journaux et dépenses sans rien perdre ; copie de sécurité faite ; l'administrateur devient PDG de démarrage", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linklink-mig4-'));
+    let s = await startServer(dir);
+    const c = await new Client(s.url).register('Admin', 'admin@t.test');
+    const pid = (await c.post('/projects', { name: 'Projet v3' })).data.project.id;
+    await c.post('/tasks', { projectId: pid, title: 'Tâche v3' });
+    await s.stop();
+    const db = new DatabaseSync(path.join(dir, 'linklink.db'));
+    db.exec(`DROP TRIGGER audit_immutable; DROP TRIGGER audit_nodelete;
+      DROP TABLE audit_log; DROP TABLE user_functions; DROP TABLE mandates; DROP TABLE absences; DROP TABLE validation_rules;
+      DROP TABLE expense_versions; DROP TABLE expense_approvals; DROP TABLE expense_payments; DROP TABLE expenses;
+      DROP TABLE communication_versions; DROP TABLE communication_validations; DROP TABLE communications; PRAGMA user_version = 3;`);
+    db.close();
+    s = srv = await startServer(dir);
+    const c2 = new Client(s.url);
+    c2.token = (await c2.post('/auth/login', { email: 'admin@t.test', password: 'motdepasse123' })).data.token;
+    expect((await c2.get('/projects')).data.projects.map((p: any) => p.name)).toContain('Projet v3');
+    expect((await c2.get('/me')).data.user.functions).toContain('pdg');
+    expect((await c2.get('/journal/business')).data.entries.some((e: any) => e.action === 'function')).toBe(true);
+    const backups = fs.readdirSync(path.join(dir, 'backups'));
+    expect(backups.some((f) => f.includes('avant-migration-v4'))).toBe(true);
+    const after = new DatabaseSync(path.join(dir, 'linklink.db'));
+    expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(4);
+    expect(() => after.exec("UPDATE audit_log SET summary = 'trafiqué'")).toThrow(/immuable/);
+    expect(() => after.exec('DELETE FROM audit_log')).toThrow(/immuable/);
     after.close();
   });
 });
