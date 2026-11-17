@@ -26,6 +26,13 @@ const go = async (page: Page, hash: string) => {
   await page.evaluate((h) => { location.hash = h; }, hash);
 };
 
+/** Appel d'API avec la session de la page (le jeton est dans le stockage local). */
+const apiCall = (page: Page, method: string, url: string, body?: unknown) =>
+  page.evaluate(async ({ method, url, body }) => {
+    const r = await fetch(`/api${url}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${localStorage.getItem('linklink_token')}` }, body: body ? JSON.stringify(body) : undefined });
+    return { status: r.status, data: await r.json().catch(() => ({})) };
+  }, { method, url, body });
+
 let browser: Browser;
 let ctxA: BrowserContext, ctxB: BrowserContext, ctxC: BrowserContext;
 let admin: Page, founder: Page, guest: Page;
@@ -55,9 +62,9 @@ test.afterAll(async () => {
   expect(errors, 'erreurs navigateur').toEqual([]);
 });
 
-test('connexion : premier compte = Super Admin, consentement obligatoire', async () => {
+test('connexion : premier compte = Administrateur technique (et PDG de démarrage), consentement obligatoire', async () => {
   await admin.goto('/');
-  await expect(admin.getByRole('heading', { name: 'Créer le compte Super Admin' })).toBeVisible();
+  await expect(admin.getByRole('heading', { name: 'Créer le compte Administrateur technique' })).toBeVisible();
   await admin.screenshot({ path: path.join(SCREENS, '01-login-desktop.png') });
   await admin.getByLabel('Nom complet').fill('Awa Camara');
   await admin.getByLabel('Adresse e-mail').fill('awa@linklink.test');
@@ -99,13 +106,21 @@ test("équipe : codes d'invitation, inscription fondateur et invité", async () 
   await expect(founder.locator('code')).toHaveCount(1); // le fondateur voit seulement le code fondateur
   await expect(admin.getByText('Ibrahima Soumah').first()).toBeVisible(); // temps réel : l'équipe se met à jour
   await expect(admin.getByLabel('Rôle de Ibrahima Soumah')).toHaveValue('guest');
+
+  // v1.2 : le PDG (ici l'administrateur technique, PDG de démarrage) attribue les fonctions de Moussa.
+  const members = (await apiCall(admin, 'GET', '/members')).data.members as { id: string; name: string }[];
+  const moussa = members.find((m) => m.name === 'Moussa Bah')!;
+  expect((await apiCall(admin, 'POST', '/functions', { userId: moussa.id, fn: 'project_lead' })).status).toBe(201);
+  expect((await apiCall(admin, 'POST', '/functions', { userId: moussa.id, fn: 'coordinator' })).status).toBe(201);
 });
 
 test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention', async () => {
+  await founder.reload(); // prend en compte les fonctions attribuées par le PDG
   await go(founder, 'projets');
   await founder.getByRole('button', { name: 'Nouveau projet' }).click();
   await founder.getByLabel('Nom du projet').fill('Application mobile');
   await founder.getByLabel('Description').fill('Application Android et API');
+  await founder.getByLabel('Responsable du projet').selectOption({ label: 'Moussa Bah' });
   await founder.getByRole('button', { name: 'Créer le projet' }).click();
   await expect(founder.getByRole('heading', { name: 'Application mobile', level: 1 })).toBeVisible();
   await founder.screenshot({ path: path.join(SCREENS, '03-projet-apercu.png') });
@@ -126,7 +141,7 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await founder.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await founder.getByRole('button', { name: 'Créer la tâche' }).click();
   await expect(founder.getByRole('dialog', { name: 'Corriger le bug de connexion' })).toBeVisible();
-  await expect(founder.getByText('Votre rôle : Créateur')).toBeVisible();
+  await expect(founder.getByText('Votre rôle : Responsable / PDG')).toBeVisible(); // le chef de projet a tous les droits sur ses tâches
 
   // Sous-tâche cochée + commentaire avec mention
   await founder.getByRole('checkbox', { name: 'Écrire les tests' }).check();
@@ -155,7 +170,7 @@ test('projet : création, tâche, Kanban, sous-tâches, commentaire avec mention
   await expect(guest.getByRole('link', { name: /Application mobile/ })).toBeVisible();
 });
 
-test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amendement v1.1", async () => {
+test("tâche : l'interface suit le rôle (assigné, observateur, responsable) — amendement v1.1", async () => {
   // Assigné (l'invité, sur téléphone) : statut modifiable, tout le reste grisé.
   await go(guest, 'taches');
   await guest.getByRole('button', { name: /Corriger le bug de connexion/ }).first().click();
@@ -180,7 +195,7 @@ test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amen
   await go(founder, 'notifications');
   await expect(founder.getByRole('button', { name: /Ibrahima Soumah a passé « Corriger le bug de connexion » à « En révision »/ })).toBeVisible();
 
-  // Le Super Admin crée une tâche dans le projet : le fondateur n'en est qu'observateur.
+  // Le Administrateur technique crée une tâche dans le projet : le fondateur n'en est qu'observateur.
   await go(admin, 'taches');
   await admin.getByRole('button', { name: 'Nouvelle tâche' }).click();
   const nt = admin.getByRole('dialog', { name: 'Nouvelle tâche' });
@@ -188,13 +203,14 @@ test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amen
   await nt.getByLabel('Titre').fill('Valider le budget');
   await nt.getByRole('button', { name: 'Créer la tâche' }).click();
   const a = admin.getByRole('dialog', { name: 'Valider le budget' });
-  await expect(a.getByText('Votre rôle : Super Admin')).toBeVisible();
+  await expect(a.getByText('Votre rôle : Responsable / PDG')).toBeVisible();
   await expect(a.getByLabel('Titre')).toBeEnabled();
   await admin.keyboard.press('Escape');
 
-  await go(founder, 'taches');
-  await founder.getByRole('button', { name: /Valider le budget/ }).first().click();
-  const o = founder.getByRole('dialog', { name: 'Valider le budget' });
+  // Le fondateur est ici chef de projet (tous les droits) : le statut d'observateur se vérifie avec l'invité, membre du projet.
+  await go(guest, 'taches');
+  await guest.getByRole('button', { name: /Valider le budget/ }).first().click();
+  const o = guest.getByRole('dialog', { name: 'Valider le budget' });
   await expect(o.getByText('👁️ Lecture seule')).toBeVisible();
   await expect(o.getByLabel('Titre')).toBeDisabled();
   await expect(o.getByRole('button', { name: 'Enregistrer' })).toHaveCount(0);
@@ -203,8 +219,8 @@ test("tâche : l'interface suit le rôle (assigné, observateur, admin) — amen
   await o.getByLabel('Votre commentaire').fill('Je valide côté finances.');
   await o.getByRole('button', { name: 'Commenter' }).click(); // les observateurs peuvent toujours commenter
   await expect(o.getByText('Je valide côté finances.')).toBeVisible();
-  await founder.screenshot({ path: path.join(SCREENS, '04c-tache-observateur.png') });
-  await founder.keyboard.press('Escape');
+  await guest.screenshot({ path: path.join(SCREENS, '04c-tache-observateur-mobile.png') });
+  await guest.keyboard.press('Escape');
 });
 
 test('invité : ne peut pas créer de projet ni de rendez-vous, ne voit pas ceux des autres', async () => {
@@ -234,9 +250,9 @@ test('messages : temps réel, non lus, DM privé, #annonces verrouillé, mention
   expect(await link.getAttribute('rel')).toBe('noopener noreferrer');
   await founder.waitForFunction(() => document.title === 'LinkLink'); // salon ouvert = lu
 
-  // #annonces : lecture seule pour un fondateur, écriture pour le Super Admin
+  // #annonces : lecture seule pour un fondateur, écriture pour le Administrateur technique
   await founder.getByRole('button', { name: '# annonces' }).click();
-  await expect(founder.getByText('Seul le Super Admin peut écrire dans ce salon.')).toBeVisible();
+  await expect(founder.getByText('Salon réservé aux annonces')).toBeVisible();
 
   // Message direct admin → fondateur : privé, avec badge non lu
   await go(admin, 'equipe');
@@ -274,7 +290,7 @@ test('reconnexion : coupure du temps réel, indicateur, rattrapage des messages 
   live.forEach((ws) => ws.close());
   await expect(founder.getByText('○ Reconnexion…')).toBeVisible();
 
-  // Pendant la coupure, le Super Admin écrit : le fondateur ne peut pas le recevoir en direct.
+  // Pendant la coupure, le Administrateur technique écrit : le fondateur ne peut pas le recevoir en direct.
   await admin.getByLabel('Votre message').locator('visible=true').fill('Écrit pendant la coupure');
   await admin.getByRole('button', { name: 'Envoyer' }).locator('visible=true').click();
   await expect(founder.getByText('Écrit pendant la coupure')).toHaveCount(0);
@@ -302,7 +318,7 @@ test('documents : dépôt avec niveau, recherche, téléchargement, confidential
   await expect(founder.getByText('strategie.pdf').first()).toBeVisible();
   await founder.screenshot({ path: path.join(SCREENS, '10-documents-desktop.png') });
 
-  // Le Super Admin voit les deux, peut rechercher et télécharger
+  // Le Administrateur technique voit les deux, peut rechercher et télécharger
   await go(admin, 'documents');
   await admin.getByLabel('Rechercher un fichier').fill('specif');
   await expect(admin.getByText('specification.pdf').first()).toBeVisible();
@@ -362,35 +378,77 @@ test('profil, RGPD, journal, pages légales', async () => {
   await go(admin, 'journal');
   await expect(admin.getByText(/Projet « Application mobile » créé/)).toBeVisible();
   await admin.screenshot({ path: path.join(SCREENS, '13-journal.png') });
-  await go(founder, 'journal'); // route réservée : retombe sur l'accueil
-  await expect(founder.getByRole('heading', { name: /^(Bonjour|Bonsoir)/ })).toBeVisible();
+  // Un fondateur sans fonction de contrôle ne voit que le journal d'urgence (transparence) : ni activité, ni décisions métier, ni sécurité.
+  await go(founder, 'journal');
+  await expect(founder.getByRole('tab', { name: 'Urgence' })).toBeVisible();
+  await expect(founder.getByRole('tab', { name: 'Activité' })).toHaveCount(0);
+  await expect(founder.getByRole('tab', { name: 'Décisions métier' })).toHaveCount(0);
+  await go(guest, 'journal'); // route réservée : retombe sur l'accueil
+  await expect(guest.getByRole('heading', { name: /^(Bonjour|Bonsoir)/ })).toBeVisible();
 
   await go(guest, 'legal/confidentialite');
   await expect(guest.getByRole('heading', { name: 'Politique de confidentialité' })).toBeVisible();
   await go(guest, 'accueil');
 });
 
-test('archivage : seul un projet terminé s’archive, puis lecture seule', async () => {
+test('archivage en deux temps : le responsable déclare, le PDG confirme, puis lecture seule', async () => {
   await go(founder, 'projets');
   await founder.getByRole('link', { name: /Application mobile/ }).click();
-  await founder.getByRole('button', { name: 'Modifier' }).click();
-  await founder.getByLabel('Statut').selectOption('done');
-  await founder.getByRole('button', { name: 'Enregistrer' }).click();
-  await founder.getByRole('button', { name: 'Archiver le projet' }).click();
-  await expect(founder.getByText('Projet archivé : consultable, mais non modifiable.')).toBeVisible();
+  await expect(founder.getByRole('button', { name: 'Confirmer l\'archivage' })).toHaveCount(0); // le chef de projet ne confirme pas lui-même
+  await founder.getByRole('button', { name: 'Déclarer le projet terminé' }).click();
+  const dlg = founder.getByRole('dialog', { name: 'Déclarer le projet terminé' });
+  for (const f of await dlg.getByLabel(/pourquoi reste-t-elle ouverte/).all()) await f.fill('Reportée à la prochaine version');
+  await dlg.getByRole('button', { name: 'Déclarer terminé' }).click();
+  await expect(founder.getByText(/en attente de la confirmation d'archivage par le PDG/)).toBeVisible();
+
+  // Le PDG (administrateur technique de démarrage) confirme.
+  await go(admin, 'projets');
+  await admin.getByRole('link', { name: /Application mobile/ }).click();
+  await admin.getByRole('button', { name: "Confirmer l'archivage" }).click();
+  await admin.getByRole('button', { name: 'Archiver', exact: true }).click();
+  await expect(admin.getByText(/archivé/i).first()).toBeVisible();
+  await expect(founder.getByText('Projet archivé : consultable, mais non modifiable.')).toBeVisible(); // temps réel
   await founder.getByRole('tab', { name: 'Tâches' }).click();
   await expect(founder.getByRole('button', { name: 'Nouvelle tâche' })).toHaveCount(0);
+});
+
+test('v1.2 : demande de dépense, validation par le PDG, gouvernance et communications', async () => {
+  // Le fondateur demande une dépense ; le PDG la voit dans ses validations et l'approuve ; le journal métier la retrace.
+  await go(founder, 'finances');
+  await founder.getByRole('button', { name: 'Nouvelle demande' }).click();
+  const f = founder.getByRole('dialog', { name: 'Nouvelle demande de dépense' });
+  await f.getByRole('textbox', { name: 'Bénéficiaire' }).fill('Hébergeur cloud');
+  await f.getByLabel('Montant').fill('150000');
+  await f.getByLabel('Motif').fill('Abonnement serveur du mois');
+  await f.getByRole('button', { name: 'Soumettre la demande' }).click();
+  await expect(founder.getByText('Hébergeur cloud').first()).toBeVisible();
+
+  await go(admin, 'gouvernance');
+  await expect(admin.getByRole('heading', { name: 'Gouvernance' })).toBeVisible();
+  await expect(admin.getByText(/Hébergeur cloud/).first()).toBeVisible({ timeout: 15_000 });
+  const pend = (await apiCall(admin, 'GET', '/expenses')).data.expenses as { id: string; beneficiary: string; status: string }[];
+  const exp = pend.find((e) => e.beneficiary === 'Hébergeur cloud')!;
+  expect(exp.status).toBe('pending');
+  expect((await apiCall(admin, 'POST', `/expenses/${exp.id}/decision`, { decision: 'approve' })).status).toBe(200);
+  await admin.screenshot({ path: path.join(SCREENS, '14-gouvernance.png') });
+
+  // Séparation des pouvoirs : le fondateur (sans fonction de Caissier) ne peut pas déclarer de paiement.
+  expect((await apiCall(founder, 'POST', `/expenses/${exp.id}/payments`, { amount: 150000 })).status).toBe(403);
+  await go(founder, 'communications');
+  await expect(founder.getByRole('heading', { name: 'Communications' })).toBeVisible();
+  await go(founder, 'accueil');
 });
 
 test('accessibilité WCAG AA (axe) sur les écrans principaux', async () => {
   const all: string[] = [];
   for (const [page, name, routes] of [
-    [admin, 'bureau', ['accueil', 'projets', 'taches', 'messages', 'rendez-vous', 'documents', 'equipe', 'notifications', 'profil', 'journal']],
+    [admin, 'bureau', ['accueil', 'projets', 'taches', 'messages', 'rendez-vous', 'documents', 'equipe', 'notifications', 'profil', 'journal', 'finances', 'communications', 'gouvernance']],
     [guest, 'mobile', ['accueil', 'projets', 'taches', 'messages', 'rendez-vous', 'equipe', 'documents', 'notifications', 'profil']],
   ] as [Page, string, string[]][]) {
     for (const r of routes) {
       await go(page, r);
       await page.waitForTimeout(400);
+      await expect(page.locator('[aria-live=polite] [role=status]')).toHaveCount(0, { timeout: 15_000 }); // une notification en cours d'animation fausse la mesure de contraste
       const res = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
       if (name === 'mobile') {
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
