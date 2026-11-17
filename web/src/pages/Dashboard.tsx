@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useAuth } from '../auth';
 import { useApp } from '../data';
 import { formatDateTime, formatDue } from '../format';
+import { useCan } from '../perm';
 import { useRealtime, useRealtimeEvents } from '../realtime';
 import type { Dashboard as Data } from '../types';
 import { Empty, ErrorNote, Icon, PageHeader, PriorityChip, Spinner, type IconName } from '../ui';
@@ -23,8 +24,16 @@ export function Dashboard() {
   const { user } = useAuth();
   const { unreadMessages } = useApp();
   const { epoch } = useRealtime();
+  const { isStaff } = useCan();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
+  const [todo, setTodo] = useState<{ type: string; id: string; title: string; detail: string; link: string; blocked: boolean; canDecide: boolean }[]>([]);
+  const [alerts, setAlerts] = useState<{ orphans: { id: string; name: string }[]; discrepancies: number } | null>(null);
+  useEffect(() => {
+    if (!isStaff) return;
+    api<{ pending: typeof todo }>('/validations').then((r) => setTodo(r.pending)).catch(() => {});
+    api<{ orphans: { id: string; name: string }[]; discrepancies: number }>('/governance/overview').then(setAlerts).catch(() => {});
+  }, [isStaff, epoch]);
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +63,28 @@ export function Dashboard() {
               <Kpi label="Rendez-vous cette semaine" value={data.kpis.meetingsThisWeek} icon="calendar" href="#rendez-vous" />
               <Kpi label="Nouveaux fichiers (7 jours)" value={data.kpis.newFiles} icon="folder" href="#documents" />
             </section>
+
+            {isStaff && (todo.length > 0 || (alerts && (alerts.orphans.length > 0 || alerts.discrepancies > 0))) && (
+              <section className="card p-4" aria-label="Validations et alertes">
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="font-bold">Validations et alertes</h2>
+                  <a href="#gouvernance/validations" className="text-sm font-semibold text-electric hover:underline">Tout voir</a>
+                </div>
+                <ul className="space-y-1">
+                  {todo.slice(0, 5).map((t) => (
+                    <li key={`${t.type}:${t.id}`}>
+                      <a href={t.link} className="flex flex-wrap items-center gap-2 rounded-xl p-2 hover:bg-mist">
+                        <span className="min-w-0 flex-1 truncate font-semibold">{t.title}</span>
+                        {t.canDecide && <span className="badge bd-electric">À vous de décider</span>}
+                        {t.blocked && <span className="badge bd-danger">Bloquée</span>}
+                      </a>
+                    </li>
+                  ))}
+                  {alerts?.orphans.slice(0, 3).map((o) => <li key={o.id}><a href={`#projets/${o.id}`} className="block rounded-xl p-2 hover:bg-mist">Projet sans responsable disponible : <strong>{o.name}</strong></a></li>)}
+                  {alerts && alerts.discrepancies > 0 && <li><a href="#finances" className="block rounded-xl p-2 hover:bg-mist">{alerts.discrepancies} écart{alerts.discrepancies > 1 ? 's' : ''} de paiement à régulariser</a></li>}
+                </ul>
+              </section>
+            )}
 
             <div className="grid gap-4 lg:grid-cols-3">
               <section className="card min-w-0 p-4 lg:col-span-2" aria-label="Mes tâches du jour">

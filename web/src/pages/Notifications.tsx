@@ -4,7 +4,7 @@ import { formatDateTime } from '../format';
 import { go } from '../route';
 import { Empty, Icon, PageHeader, type IconName } from '../ui';
 
-const ICON: Record<string, IconName> = { assigned: 'tasks', mention: 'chat', due_soon: 'clock', due_today: 'clock', overdue: 'clock', meeting: 'calendar', meeting_reminder: 'calendar', project: 'projects', dm: 'chat' };
+const ICON: Record<string, IconName> = { assigned: 'tasks', mention: 'chat', due_soon: 'clock', due_today: 'clock', overdue: 'clock', meeting: 'calendar', meeting_reminder: 'calendar', project: 'projects', dm: 'chat', validation: 'check', finance: 'folder', communication: 'chat', security: 'shield', system: 'bell' };
 
 export function Notifications() {
   const { notifications, unreadNotifs, markNotifsRead, refreshNotifs } = useApp();
@@ -26,7 +26,7 @@ export function Notifications() {
               >
                 <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${n.readAt ? 'bg-mist text-slate' : 'bg-electric text-white'}`}><Icon name={ICON[n.type] ?? 'bell'} className="h-5 w-5" /></span>
                 <span className="min-w-0 flex-1">
-                  <span className={`block ${n.readAt ? 'font-medium' : 'font-bold'}`}>{n.title}</span>
+                  <span className={`block ${n.readAt ? 'font-medium' : 'font-bold'}`}>{n.category === 'urgent' && <span className="badge bd-danger mr-2">Urgent</span>}{n.category === 'action' && <span className="badge bd-electric mr-2">Action</span>}{n.title}</span>
                   {n.body && <span className="block truncate text-sm text-slate">{n.body}</span>}
                   <span className="text-xs text-slate">{formatDateTime(n.createdAt)}</span>
                 </span>

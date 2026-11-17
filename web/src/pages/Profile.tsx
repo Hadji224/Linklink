@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api, downloadBlob, setToken } from '../api';
 import { useAuth } from '../auth';
-import { ROLE_LABEL, type User } from '../types';
+import { FN_LABEL, ROLE_LABEL, type User } from '../types';
 import { Avatar, ErrorNote, Field, Modal, PageHeader, RoleChip, useConfirm, useToast } from '../ui';
 
 export function Profile() {
@@ -83,7 +83,7 @@ export function Profile() {
           <h2 className="font-bold">Informations</h2>
           <Field label="Nom complet"><input className="field" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} autoComplete="name" /></Field>
           <Field label="Adresse e-mail"><input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" /></Field>
-          <p className="text-sm text-slate">Votre rôle ({ROLE_LABEL[user.role]}) est géré par le Super Admin.</p>
+          <p className="text-sm text-slate">Votre rôle d'accès ({ROLE_LABEL[user.role]}) ne donne pas de pouvoir métier. {user.functions?.length ? <>Vos fonctions : <strong>{user.functions.map((f) => FN_LABEL[f]).join(', ')}</strong>.</> : 'Vous n\'avez pas de fonction pour l\'instant.'} Absences, mandats et accès d'urgence : <a className="font-semibold text-electric" href="#gouvernance/mandats">Gouvernance</a>.</p>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#135fea]" checked={emailNotif} onChange={(e) => setEmailNotif(e.target.checked)} />
             <span><strong>Recevoir les notifications par e-mail</strong><br /><span className="text-slate">Assignations, mentions, rappels d'échéance et de rendez-vous.</span></span>

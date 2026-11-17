@@ -8,6 +8,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (input: { name: string; email: string; password: string; inviteCode: string; consent: boolean }) => Promise<void>;
   setUser: (u: User) => void;
+  /** Recharge le profil, les fonctions et les capacités (après un changement de fonction, de mandat ou de rôle). */
+  refreshMe: () => Promise<void>;
   logout: () => void;
 }
 
@@ -27,10 +29,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
+  const refreshMe = useCallback(async () => {
+    const r = await api<{ user: User; can?: User['can'] }>('/me');
+    setUser({ ...r.user, can: r.can });
+  }, []);
+
   useEffect(() => {
     if (!getToken()) return;
-    api<{ user: User }>('/me')
-      .then((r) => setUser(r.user))
+    api<{ user: User; can?: User['can'] }>('/me')
+      .then((r) => setUser({ ...r.user, can: r.can }))
       .catch(() => {
         /* 401 : déjà géré par le gestionnaire ; autre erreur : on affiche la connexion */
       })
@@ -43,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       logout,
       setUser,
+      refreshMe,
       login: async (email, password) => {
         const r = await api<{ token: string; user: User }>('/auth/login', {
           method: 'POST',
@@ -50,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setToken(r.token);
         setUser(r.user);
+        void api<{ user: User; can?: User['can'] }>('/me').then((m) => setUser({ ...m.user, can: m.can })).catch(() => {});
       },
       register: async (input) => {
         const r = await api<{ token: string; user: User }>('/auth/register', {
@@ -58,9 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setToken(r.token);
         setUser(r.user);
+        void api<{ user: User; can?: User['can'] }>('/me').then((m) => setUser({ ...m.user, can: m.can })).catch(() => {});
       },
     }),
-    [user, loading, logout],
+    [user, loading, logout, refreshMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

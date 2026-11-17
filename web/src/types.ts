@@ -5,16 +5,27 @@ export type ProjectStatus = 'active' | 'paused' | 'done' | 'archived';
 export type TaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type Priority = 'urgent' | 'high' | 'medium' | 'low';
 
-export const ROLE_LABEL: Record<Role, string> = { admin: 'Super Admin', member: 'Fondateur', guest: 'Invité interne' };
-export const STATUS_LABEL: Record<ProjectStatus, string> = { active: 'Actif', paused: 'En pause', done: 'Terminé', archived: 'Archivé' };
+export const ROLE_LABEL: Record<Role, string> = { admin: 'Administrateur technique', member: 'Fondateur', guest: 'Invité interne' };
+
+/** Fonctions de gouvernance (spécification v1.2 §3). */
+export type Fn = 'pdg' | 'coordinator' | 'project_lead' | 'infra_lead' | 'treasurer' | 'comms';
+export const FN_LABEL: Record<Fn, string> = {
+  pdg: 'PDG', coordinator: 'Coordinateur', project_lead: 'Chef de projet', infra_lead: "Chef d'infrastructures", treasurer: 'Caissier', comms: 'Chargé de communication',
+};
+export const FN_KEYS = Object.keys(FN_LABEL) as Fn[];
+export type Capability =
+  | 'project.create' | 'project.delete' | 'project.reopen' | 'project.confirm_archive' | 'function.assign' | 'mandate.grant' | 'rules.edit'
+  | 'finance.read' | 'expense.create' | 'expense.pay' | 'announce.internal' | 'announce.service' | 'crisis.publish' | 'comm.publish' | 'comm.prepare'
+  | 'comm.withdraw' | 'journal.business' | 'journal.security' | 'journal.emergency' | 'infra.read' | 'tech.ops' | 'account.suspend';
+export const STATUS_LABEL: Record<ProjectStatus, string> = { active: 'Actif', paused: 'En pause', done: 'Terminé — à archiver', archived: 'Archivé' };
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { todo: 'À faire', doing: 'En cours', review: 'En révision', done: 'Terminé' };
 export const PRIORITY_LABEL: Record<Priority, string> = { urgent: 'Urgent', high: 'Élevée', medium: 'Moyenne', low: 'Basse' };
 export const LEVEL_LABEL: Record<Level, string> = { public: 'Public', internal: 'Interne', confidential: 'Confidentiel', strict: 'Strictement confidentiel' };
 export const LEVEL_HELP: Record<Level, string> = {
   public: 'Peut être diffusé à l’extérieur.',
   internal: 'Réservé à l’équipe.',
-  confidential: 'Accessible uniquement aux personnes concernées (auteur, Super Admin, membres du projet).',
-  strict: 'Stratégie, accès techniques, données sensibles : auteur et Super Admin seulement.',
+  confidential: 'Accessible uniquement aux personnes concernées (auteur, administrateur technique, membres du projet).',
+  strict: 'Stratégie, accès techniques, données sensibles : auteur et administrateur technique seulement.',
 };
 
 export interface User {
@@ -23,11 +34,15 @@ export interface User {
   email: string;
   role: Role;
   emailNotif?: boolean;
+  functions?: Fn[];
+  /** Capacités calculées par le serveur (pour masquer les boutons ; le serveur reste seul juge). */
+  can?: Partial<Record<Capability, boolean>>;
 }
 
 export interface Member extends User {
   createdAt: string;
   online: boolean;
+  suspended?: boolean;
 }
 
 export interface Channel {
@@ -72,6 +87,17 @@ export interface Project {
   members: { id: string; name: string; role: Role }[];
   folderId: string | null;
   channelId: string | null;
+  lead?: { id: string; name: string } | null;
+  orphan?: boolean;
+  doneAt?: string | null;
+  archiveMotive?: string;
+  pendingProposals?: number;
+  permissions?: ProjectPermissions;
+}
+
+export interface ProjectPermissions {
+  edit: boolean; manageMembers: boolean; proposeMembers: boolean; designateLead: boolean; proposeLead: boolean;
+  declareDone: boolean; decideArchive: boolean; reopen: boolean; delete: boolean;
 }
 
 export interface Task {
@@ -97,10 +123,11 @@ export interface Task {
   myRole: TaskRole;
   lock: 'none' | 'locked' | 'archived';
   permissions: TaskPermissions;
+  blockedBy?: number;
 }
 
-export type TaskRole = 'admin' | 'creator' | 'assignee' | 'observer';
-export const TASK_ROLE_LABEL: Record<TaskRole, string> = { admin: 'Super Admin', creator: 'Créateur', assignee: 'Assigné', observer: 'Observateur' };
+export type TaskRole = 'admin' | 'coordinator' | 'creator' | 'assignee' | 'observer';
+export const TASK_ROLE_LABEL: Record<TaskRole, string> = { admin: 'Responsable / PDG', coordinator: 'Coordinateur', creator: 'Créateur', assignee: 'Assigné', observer: 'Observateur' };
 
 export interface TaskPermissions {
   edit: boolean;
@@ -154,6 +181,7 @@ export interface DocFile extends FileRef {
 export interface Notif {
   id: string;
   type: string;
+  category?: 'info' | 'action' | 'urgent';
   title: string;
   body: string;
   link: string;

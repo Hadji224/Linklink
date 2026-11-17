@@ -32,7 +32,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 }
 
 interface Options {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   form?: FormData;
 }

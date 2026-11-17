@@ -4,7 +4,7 @@ import { useAuth } from '../auth';
 import { useApp } from '../data';
 import { formatShortDate } from '../format';
 import { go } from '../route';
-import { ROLE_LABEL, type Role } from '../types';
+import { FN_LABEL, ROLE_LABEL, type Role } from '../types';
 import { Avatar, ErrorNote, Icon, PageHeader, RoleChip, useConfirm, useToast } from '../ui';
 
 function CodeBox({ label, code, onRegenerate, help }: { label: string; code: string; onRegenerate?: () => void; help: string }) {
@@ -81,6 +81,7 @@ export function Team() {
       </PageHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-3xl">
         <ErrorNote>{error}</ErrorNote>
+        {canInvite && <p className="text-sm text-slate">Les fonctions (PDG, Caissier…) et les mandats se gèrent dans <a className="font-semibold text-electric" href="#gouvernance/fonctions">Gouvernance</a>. L'administration technique ne se transmet que par la procédure de <a className="font-semibold text-electric" href="#gouvernance/securite">transfert</a>.</p>}
         <ul className="space-y-2" aria-label="Membres">
           {members.map((m) => (
             <li key={m.id} className="card flex flex-wrap items-center gap-3 p-3">
@@ -88,11 +89,17 @@ export function Team() {
               <div className="min-w-0 flex-1">
                 <p className="truncate font-bold">{m.name} {m.id === user?.id && <span className="text-sm font-normal text-electric">(vous)</span>}</p>
                 {m.role !== 'guest' || isAdmin ? <p className="truncate text-sm text-slate">{m.email}</p> : null}
+                {(m.functions?.length || m.suspended) ? (
+                  <p className="mt-0.5 flex flex-wrap gap-1">
+                    {m.functions?.map((f) => <span key={f} className="badge bd-electric">{FN_LABEL[f]}</span>)}
+                    {m.suspended && <span className="badge bd-danger">Compte suspendu</span>}
+                  </p>
+                ) : null}
                 <p className="text-xs text-slate">Arrivé le {formatShortDate(m.createdAt)}</p>
               </div>
-              {isAdmin && m.id !== user?.id ? (
+              {isAdmin && m.id !== user?.id && m.role !== 'admin' ? (
                 <select aria-label={`Rôle de ${m.name}`} className="field !w-auto" value={m.role} onChange={(e) => void setRole(m.id, e.target.value as Role)}>
-                  {(Object.keys(ROLE_LABEL) as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                  {(['member', 'guest'] as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                 </select>
               ) : <RoleChip role={m.role} />}
               {m.id !== user?.id && (

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormE
 import { api, downloadFile } from '../api';
 import { useAuth } from '../auth';
 import { useApp } from '../data';
+import { useCan } from '../perm';
 import { formatDay, formatSize, formatTime } from '../format';
 import { useRealtime, useRealtimeEvents } from '../realtime';
 import type { Channel, Message } from '../types';
@@ -47,6 +48,7 @@ interface PanelProps {
 /** Fil de discussion d'un salon (utilisé par l'écran Messages et par l'onglet Messages d'un projet). */
 export function ChatPanel({ channelId, active, onBack }: PanelProps) {
   const { user } = useAuth();
+  const { can } = useCan();
   const { epoch } = useRealtime();
   const { channels, members, setOpenChannel } = useApp();
   const toast = useToast();
@@ -63,7 +65,7 @@ export function ChatPanel({ channelId, active, onBack }: PanelProps) {
   const area = useRef<HTMLTextAreaElement>(null);
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
-  const canWrite = !!channel && (!channel.adminOnly || user?.role === 'admin');
+  const canWrite = !!channel && (!channel.adminOnly || can('announce.internal') || can('announce.service'));
   const names = useMemo(() => members.map((m) => m.name), [members]);
   const currentId = useRef(channelId);
   currentId.current = channelId;
@@ -273,7 +275,7 @@ export function ChatPanel({ channelId, active, onBack }: PanelProps) {
       <div className="relative border-t border-line bg-white p-2">
         <ErrorNote>{error}</ErrorNote>
         {channel && !canWrite ? (
-          <p className="px-2 py-3 text-center text-sm text-slate">Seul le Super Admin peut écrire dans ce salon.</p>
+          <p className="px-2 py-3 text-center text-sm text-slate">Salon réservé aux annonces : seuls le PDG, le Chargé de communication et l'administrateur technique y écrivent.</p>
         ) : (
           <>
             {suggest.length > 0 && (

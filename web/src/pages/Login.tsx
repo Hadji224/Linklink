@@ -50,11 +50,11 @@ export function Login() {
 
         <form onSubmit={submit} className="card space-y-3 p-5 shadow-xl">
           <h1 className="text-lg font-bold">
-            {mode === 'login' ? 'Connexion' : firstAccount ? 'Créer le compte Super Admin' : "Rejoindre l'équipe"}
+            {mode === 'login' ? 'Connexion' : firstAccount ? 'Créer le compte Administrateur technique' : "Rejoindre l'équipe"}
           </h1>
           {firstAccount && (
             <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-navy">
-              Aucun compte n'existe encore : le premier compte créé sera <strong>Super Admin</strong>.
+              Aucun compte n'existe encore : le premier compte créé sera <strong>Administrateur technique</strong> (il tient aussi la fonction PDG tant qu'aucun fondateur ne la reçoit).
             </p>
           )}
 

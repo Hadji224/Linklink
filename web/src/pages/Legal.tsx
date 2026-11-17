@@ -12,7 +12,8 @@ function Cgu() {
       <p className="mt-2">La plateforme LinkLink est l'outil interne de l'équipe : messages, projets et tâches, rendez-vous et dépôt de documents. Elle remplace les échanges de travail sur WhatsApp. L'accès se fait uniquement sur invitation.</p>
       <H>2. Rôles</H>
       <ul className="mt-2 list-disc space-y-1 pl-5">
-        <li><strong>Super Admin</strong> : contrôle total, gestion des rôles, journal d'activité.</li>
+        <li><strong>Administrateur technique</strong> : exploitation de la plateforme (comptes, sauvegardes, sécurité). Il ne décide pas des dépenses ni des publications.</li>
+        <li><strong>Fondateurs</strong> : tiennent une ou plusieurs fonctions (PDG, Coordinateur, Chef de projet, Chef d'infrastructures, Caissier, Chargé de communication), attribuées par le PDG.</li>
         <li><strong>Fondateur</strong> : accès aux projets et aux salons, création de projets et de rendez-vous.</li>
         <li><strong>Invité interne</strong> : prestataire temporaire, accès limité aux projets auxquels il est ajouté.</li>
       </ul>
@@ -25,9 +26,9 @@ function Cgu() {
         <li>Ne déposez que des contenus dont vous avez le droit de disposer.</li>
       </ul>
       <H>4. Compte et sécurité</H>
-      <p className="mt-2">Vous êtes responsable de votre mot de passe. Ne le partagez pas. En cas de doute sur la sécurité de votre compte, changez votre mot de passe depuis votre profil et prévenez le Super Admin. Les actions importantes sont enregistrées dans un journal d'activité visible du Super Admin.</p>
+      <p className="mt-2">Vous êtes responsable de votre mot de passe. Ne le partagez pas. En cas de doute sur la sécurité de votre compte, changez votre mot de passe depuis votre profil et prévenez l'administrateur technique. Les actions importantes sont enregistrées dans un journal d'activité consultable par l'administrateur technique et le PDG (journaux métier, sécurité et urgence non modifiables).</p>
       <H>5. Fin d'accès</H>
-      <p className="mt-2">Le Super Admin peut retirer un accès. Vous pouvez à tout moment supprimer votre compte depuis votre profil (voir la politique de confidentialité).</p>
+      <p className="mt-2">L'administrateur technique peut suspendre un accès (validé par le PDG). Vous pouvez à tout moment supprimer votre compte depuis votre profil (voir la politique de confidentialité).</p>
     </>
   );
 }
@@ -55,7 +56,7 @@ function Privacy() {
         <li><strong>Rectification</strong> : modifiez votre nom et votre e-mail depuis votre profil.</li>
         <li><strong>Effacement</strong> : supprimez votre compte depuis votre profil ; vos messages, fichiers, commentaires et notifications sont supprimés en cascade.</li>
       </ul>
-      <p className="mt-2">Pour toute question ou demande, contactez le Super Admin, qui assure le rôle de délégué à la protection des données.</p>
+      <p className="mt-2">Pour toute question ou demande, contactez l'administrateur technique, qui assure le rôle de délégué à la protection des données.</p>
       <H>6. Cookies et stockage local</H>
       <p className="mt-2">Aucun cookie de suivi. Votre navigateur conserve uniquement un jeton de session (30 jours) pour vous garder connecté ; il est effacé à la déconnexion.</p>
       <H>7. Hébergement et sécurité</H>

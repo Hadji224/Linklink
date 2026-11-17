@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { useApp } from '../data';
 import { formatDateTime } from '../format';
+import { useCan } from '../perm';
 import { go } from '../route';
 import { STATUS_LABEL, TASK_STATUS_LABEL, type ActivityItem, type Project, type ProjectStatus, type Task } from '../types';
 import { Avatar, AvatarStack, Empty, ErrorNote, Field, Icon, Modal, PageHeader, ProgressBar, RoleChip, Spinner, StatusChip, Tabs, useConfirm, useToast } from '../ui';
 import { ChatPanel } from './Chat';
 import { FileBrowser } from './Documents';
+import { FormModal } from './FormModal';
 import { MeetingList } from './Meetings';
 import { TaskBoard } from './Tasks';
 
@@ -33,6 +35,7 @@ function ProjectForm({ project, onClose, onSaved }: { project?: Project; onClose
   const [color, setColor] = useState(project?.color ?? PALETTE[0]!);
   const [status, setStatus] = useState<ProjectStatus>(project?.status ?? 'active');
   const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [leadId, setLeadId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -43,7 +46,7 @@ function ProjectForm({ project, onClose, onSaved }: { project?: Project; onClose
     try {
       const r = project
         ? await api<{ project: Project }>(`/projects/${project.id}`, { method: 'PATCH', body: { name, description, color, status } })
-        : await api<{ project: Project }>('/projects', { method: 'POST', body: { name, description, color, memberIds } });
+        : await api<{ project: Project }>('/projects', { method: 'POST', body: { name, description, color, memberIds, leadId: leadId || null } });
       toast.success(project ? 'Projet modifié' : 'Projet créé');
       onSaved(r.project);
     } catch (err) {
@@ -59,16 +62,24 @@ function ProjectForm({ project, onClose, onSaved }: { project?: Project; onClose
         <Field label="Nom du projet"><input className="field" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} /></Field>
         <Field label="Description"><textarea className="field" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} /></Field>
         <div><span className="label">Couleur d'identification</span><div className="mt-1"><ColorPicker value={color} onChange={setColor} /></div></div>
-        {project && (
-          <Field label="Statut" hint="Un projet terminé peut ensuite être archivé : il reste consultable mais n'est plus modifiable.">
+        {project && (project.status === 'active' || project.status === 'paused') && (
+          <Field label="Statut" hint="La fin de projet se déclare depuis la vue d'ensemble : le responsable déclare « terminé », le PDG confirme l'archivage.">
             <select className="field" value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)}>
-              {(['active', 'paused', 'done', 'archived'] as ProjectStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+              {(['active', 'paused'] as ProjectStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+            </select>
+          </Field>
+        )}
+        {!project && (
+          <Field label="Responsable du projet" hint="Un fondateur ayant la fonction « Chef de projet ». Sans responsable, le projet est signalé comme orphelin.">
+            <select className="field" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+              <option value="">Aucun pour l'instant</option>
+              {members.filter((m) => m.functions?.includes('project_lead') && !m.suspended).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </Field>
         )}
         {!project && (
           <fieldset>
-            <legend className="label">Membres (vous êtes ajouté automatiquement)</legend>
+            <legend className="label">Membres (vous et le responsable êtes ajoutés automatiquement)</legend>
             <div className="mt-1 max-h-44 space-y-1 overflow-y-auto">
               {members.filter((m) => m.id !== user?.id).map((m) => (
                 <label key={m.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-mist">
@@ -99,6 +110,7 @@ function ProjectCard({ p, list }: { p: Project; list: boolean }) {
             <h3 className="font-bold leading-snug">{p.name}</h3>
             <StatusChip status={p.status} />
           </div>
+          {p.orphan && <span className="badge bd-warning mt-1">Sans responsable disponible</span>}
           {p.description && <p className="mt-1 line-clamp-2 text-sm text-slate">{p.description}</p>}
         </div>
         <div className={list ? 'w-full sm:w-64' : 'mt-3'}>
@@ -113,6 +125,7 @@ function ProjectCard({ p, list }: { p: Project; list: boolean }) {
 
 export function Projects() {
   const { user } = useAuth();
+  const { can } = useCan();
   const { projects, refreshProjects } = useApp();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | ProjectStatus>('all');
@@ -128,7 +141,7 @@ export function Projects() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Projets">
-        {user?.role !== 'guest' && <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" className="h-4 w-4" /> Nouveau projet</button>}
+        {can('project.create') && <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" className="h-4 w-4" /> Nouveau projet</button>}
       </PageHeader>
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-white px-3 py-2">
         <div className="relative min-w-44 flex-1">
@@ -149,8 +162,8 @@ export function Projects() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-5">
         {shown.length === 0 && (
-          <Empty action={user?.role !== 'guest' && status === 'all' && !q ? <button className="btn btn-primary" onClick={() => setCreating(true)}>Créer le premier projet</button> : undefined}>
-            {user?.role === 'guest' && projects.length === 0 ? "Vous n'avez pas encore été ajouté à un projet." : 'Aucun projet ne correspond.'}
+          <Empty action={can('project.create') && status === 'all' && !q ? <button className="btn btn-primary" onClick={() => setCreating(true)}>Créer le premier projet</button> : undefined}>
+            {user?.role === 'guest' && projects.length === 0 ? "Vous n'avez pas encore été ajouté à un projet." : projects.length === 0 && !can('project.create') ? "Aucun projet pour l'instant : seuls le PDG et le Coordinateur en créent." : 'Aucun projet ne correspond.'}
           </Empty>
         )}
         <div className={view === 'grid' ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-3'}>
@@ -166,22 +179,42 @@ export function Projects() {
 
 type TabId = 'apercu' | 'taches' | 'dossiers' | 'messages' | 'rdv' | 'membres' | 'activite';
 
-function Overview({ p, onEdit, onArchive, onDelete }: { p: Project; onEdit: () => void; onArchive: () => void; onDelete: () => void }) {
-  const { user } = useAuth();
+function Overview({ p, onEdit, onChanged }: { p: Project; onEdit: () => void; onChanged: () => Promise<void> }) {
+  const { members } = useApp();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [dialog, setDialog] = useState<null | 'done' | 'refuse' | 'reopen' | 'lead'>(null);
   useEffect(() => { api<{ tasks: Task[] }>(`/tasks?projectId=${p.id}`).then((r) => setTasks(r.tasks)).catch(() => setTasks([])); }, [p.id, p.tasksDone, p.tasksTotal]);
   const counts = (['todo', 'doing', 'review', 'done'] as const).map((s) => ({ s, n: tasks?.filter((t) => t.status === s).length ?? 0 }));
   const next = (tasks ?? []).filter((t) => t.status !== 'done' && t.dueDate).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 5);
-  const staff = user?.role !== 'guest';
+  const open = (tasks ?? []).filter((t) => t.status !== 'done');
+  const perms = p.permissions;
+
+  async function call(path: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown, ok: string) {
+    await api(`/projects/${p.id}${path}`, { method, body });
+    toast.success(ok);
+    await onChanged();
+  }
+  async function remove() {
+    if (!(await confirm({ title: `Supprimer « ${p.name} » ?`, message: 'Tâches, dossiers, fichiers et messages du projet seront supprimés définitivement. Impossible si des dépenses ou communications y sont liées.', confirmLabel: 'Supprimer', danger: true }))) return;
+    try { await api(`/projects/${p.id}`, { method: 'DELETE' }); toast.success('Projet supprimé'); await onChanged(); go('projets'); }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Suppression impossible.'); }
+  }
+  const leads = members.filter((m) => m.functions?.includes('project_lead') && !m.suspended);
+
   return (
     <div className="space-y-4 p-3 md:p-5">
+      {p.orphan && p.status !== 'archived' && <p role="alert" className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">Ce projet n'a pas de responsable disponible. {perms?.designateLead ? 'Désignez-en un.' : perms?.proposeLead ? 'Proposez un responsable au PDG.' : 'Le PDG ou le Coordinateur doit en désigner un.'}</p>}
+      {p.status === 'done' && <p role="status" className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-electric">Projet terminé — en attente de la confirmation d'archivage par le PDG.</p>}
+      {p.archiveMotive && p.status === 'active' && <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900"><strong>Archivage refusé :</strong> {p.archiveMotive}</p>}
       <section className="card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-bold">Progression automatique</h2>
           <span className="text-2xl font-bold">{p.progress}%</span>
         </div>
         <div className="mt-2"><ProgressBar value={p.progress} color={p.color} label="Progression du projet" /></div>
-        <p className="mt-1 text-sm text-slate">{p.tasksDone} tâche{p.tasksDone > 1 ? 's' : ''} terminée{p.tasksDone > 1 ? 's' : ''} sur {p.tasksTotal}.</p>
+        <p className="mt-1 text-sm text-slate">{p.tasksDone} tâche{p.tasksDone > 1 ? 's' : ''} terminée{p.tasksDone > 1 ? 's' : ''} sur {p.tasksTotal}. Responsable : <strong>{p.lead?.name ?? 'aucun'}</strong>.</p>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {counts.map(({ s, n }) => <div key={s} className="rounded-xl bg-mist p-3 text-center"><span className="block text-xl font-bold">{n}</span><span className="text-xs font-semibold text-slate">{TASK_STATUS_LABEL[s]}</span></div>)}
         </div>
@@ -193,53 +226,95 @@ function Overview({ p, onEdit, onArchive, onDelete }: { p: Project; onEdit: () =
           <ul className="mt-2 space-y-1">{next.map((t) => <li key={t.id}><a className="flex justify-between gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-mist" href={`#projets/${p.id}/taches/${t.id}`}><span className="truncate font-semibold">{t.title}</span><span className="shrink-0 text-slate">{t.dueDate}</span></a></li>)}</ul>
         )}
       </section>
-      {staff && (
+      {perms && (
         <div className="flex flex-wrap gap-2">
-          {p.status !== 'archived' && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" className="h-4 w-4" /> Modifier</button>}
-          {p.status === 'done' && <button className="btn btn-ghost" onClick={onArchive}>Archiver le projet</button>}
-          {p.status === 'archived' && <button className="btn btn-ghost" onClick={onArchive}>Désarchiver</button>}
-          {user?.role === 'admin' && <button className="btn btn-danger" onClick={onDelete}><Icon name="trash" className="h-4 w-4" /> Supprimer</button>}
+          {perms.edit && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" className="h-4 w-4" /> Modifier</button>}
+          {(perms.designateLead || perms.proposeLead) && <button className="btn btn-ghost" onClick={() => setDialog('lead')}>{perms.designateLead ? 'Désigner le responsable' : 'Proposer un responsable'}</button>}
+          {perms.declareDone && <button className="btn btn-primary" onClick={() => setDialog('done')}>Déclarer le projet terminé</button>}
+          {perms.decideArchive && <button className="btn btn-primary" onClick={async () => { if (await confirm({ title: "Confirmer l'archivage ?", message: 'Le projet restera consultable mais ne sera plus modifiable.', confirmLabel: 'Archiver' })) { try { await call('/archive-decision', 'POST', { decision: 'approve' }, 'Projet archivé'); } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible.'); } } }}>Confirmer l'archivage</button>}
+          {perms.decideArchive && <button className="btn btn-ghost" onClick={() => setDialog('refuse')}>Refuser l'archivage</button>}
+          {perms.reopen && <button className="btn btn-ghost" onClick={() => setDialog('reopen')}>Rouvrir</button>}
+          {perms.delete && <button className="btn btn-danger" onClick={() => void remove()}><Icon name="trash" className="h-4 w-4" /> Supprimer</button>}
         </div>
       )}
+      {dialog === 'done' && (
+        <FormModal
+          title="Déclarer le projet terminé"
+          intro={open.length ? `${open.length} tâche${open.length > 1 ? 's sont' : ' est'} encore ouverte${open.length > 1 ? 's' : ''} : justifiez chacune (reportée ou annulée). Le PDG confirmera ensuite l'archivage.` : "Toutes les tâches sont terminées. Le PDG confirmera ensuite l'archivage."}
+          fields={open.map((t) => ({ name: t.id, label: `« ${t.title} » — pourquoi reste-t-elle ouverte ?`, required: true, maxLength: 500 }))}
+          submitLabel="Déclarer terminé"
+          onClose={() => setDialog(null)}
+          onSubmit={(v) => call('/done', 'POST', { notes: open.map((t) => ({ taskId: t.id, kind: 'postponed', note: v[t.id] ?? '' })) }, 'Projet déclaré terminé')}
+        />
+      )}
+      {dialog === 'refuse' && <FormModal title="Refuser l'archivage" intro="Le projet repasse « Actif » avec ce motif." fields={[{ name: 'motive', label: 'Motif', type: 'textarea', required: true }]} submitLabel="Refuser" danger onClose={() => setDialog(null)} onSubmit={(v) => call('/archive-decision', 'POST', { decision: 'refuse', motive: v.motive }, 'Archivage refusé')} />}
+      {dialog === 'reopen' && <FormModal title="Rouvrir le projet" fields={[{ name: 'motive', label: 'Motif de réouverture', type: 'textarea', required: true }]} onClose={() => setDialog(null)} onSubmit={(v) => call('/reopen', 'POST', { motive: v.motive }, 'Projet rouvert')} />}
+      {dialog === 'lead' && <FormModal title={perms?.designateLead ? 'Désigner le responsable' : 'Proposer un responsable'} intro="Le responsable doit avoir la fonction « Chef de projet »." fields={[{ name: 'userId', label: 'Chef de projet', type: 'select', required: true, options: leads.map((m) => ({ value: m.id, label: m.name })) }]} onClose={() => setDialog(null)} onSubmit={(v) => call('/lead', 'PUT', { userId: v.userId }, perms?.designateLead ? 'Responsable désigné' : 'Proposition envoyée au PDG')} />}
     </div>
   );
 }
 
+interface Proposal { id: string; action: string; target: { id: string; name: string }; proposedBy: string; status: string; motive: string; createdAt: string }
+const ACTION_FR: Record<string, string> = { add_member: 'Ajouter', remove_member: 'Retirer', set_lead: 'Désigner comme responsable' };
+
 function MembersTab({ p, readOnly }: { p: Project; readOnly: boolean }) {
-  const { user } = useAuth();
   const { members, refreshProjects } = useApp();
+  const { can } = useCan();
   const toast = useToast();
   const [adding, setAdding] = useState('');
-  const staff = user?.role !== 'guest' && !readOnly;
-  const candidates = members.filter((m) => !p.members.some((x) => x.id === m.id));
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [refuse, setRefuse] = useState<Proposal | null>(null);
+  const perms = p.permissions;
+  const mayAct = !readOnly && !!perms && (perms.manageMembers || perms.proposeMembers);
+  const candidates = members.filter((m) => !p.members.some((x) => x.id === m.id) && !m.suspended);
+  const loadProposals = useCallback(() => api<{ proposals: Proposal[] }>(`/projects/${p.id}/proposals`).then((r) => setProposals(r.proposals)).catch(() => {}), [p.id]);
+  useEffect(() => { void loadProposals(); }, [loadProposals, p.pendingProposals]);
 
   async function act(fn: () => Promise<unknown>, ok: string) {
-    try { await fn(); toast.success(ok); void refreshProjects(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible.'); }
+    try { await fn(); toast.success(ok); void refreshProjects(); void loadProposals(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible.'); }
   }
+  const pending = proposals.filter((x) => x.status === 'pending');
   return (
     <div className="space-y-3 p-3 md:p-5">
-      {staff && candidates.length > 0 && (
+      {mayAct && candidates.length > 0 && (
         <div className="card flex flex-wrap items-end gap-2 p-3">
-          <Field label="Ajouter un membre">
+          <Field label={perms?.manageMembers ? 'Ajouter un membre' : 'Proposer un membre (le PDG décide)'}>
             <select className="field" value={adding} onChange={(e) => setAdding(e.target.value)}>
               <option value="">Choisir…</option>
               {candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </Field>
-          <button className="btn btn-primary" disabled={!adding} onClick={() => void act(async () => { await api(`/projects/${p.id}/members`, { method: 'POST', body: { userId: adding } }); setAdding(''); }, 'Membre ajouté')}>Ajouter</button>
+          <button className="btn btn-primary" disabled={!adding} onClick={() => void act(async () => { await api(`/projects/${p.id}/members`, { method: 'POST', body: { userId: adding } }); setAdding(''); }, perms?.manageMembers ? 'Membre ajouté' : 'Proposition envoyée')}>{perms?.manageMembers ? 'Ajouter' : 'Proposer'}</button>
         </div>
       )}
       <ul className="space-y-2">
         {p.members.map((m) => (
           <li key={m.id} className="card flex items-center gap-3 p-3">
             <Avatar name={m.name} size={38} />
-            <span className="min-w-0 flex-1 truncate font-semibold">{m.name}</span>
+            <span className="min-w-0 flex-1 truncate font-semibold">{m.name}{p.lead?.id === m.id && <span className="badge bd-electric ml-2">Responsable</span>}</span>
             <RoleChip role={m.role} />
-            {staff && <button className="rounded-lg p-2 text-slate hover:bg-red-50 hover:text-red-700" aria-label={`Retirer ${m.name} du projet`} onClick={() => void act(() => api(`/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }), 'Membre retiré')}><Icon name="x" className="h-5 w-5" /></button>}
+            {mayAct && p.lead?.id !== m.id && <button className="rounded-lg p-2 text-slate hover:bg-red-50 hover:text-red-700" aria-label={`Retirer ${m.name} du projet`} onClick={() => void act(() => api(`/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }), perms?.manageMembers ? 'Membre retiré' : 'Proposition envoyée')}><Icon name="x" className="h-5 w-5" /></button>}
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate">Les Super Admin et Fondateurs voient tous les projets ; les invités internes ne voient que ceux où ils sont membres.</p>
+      {pending.length > 0 && (
+        <section aria-label="Propositions en attente" className="space-y-2">
+          <h3 className="font-bold">Propositions du Coordinateur</h3>
+          <ul className="space-y-2">
+            {pending.map((x) => (
+              <li key={x.id} className="card flex flex-wrap items-center gap-3 p-3 text-sm">
+                <span className="min-w-0 flex-1">{ACTION_FR[x.action] ?? x.action} <strong>{x.target.name}</strong> <span className="text-slate">· proposé par {x.proposedBy}</span></span>
+                {can('function.assign') && <>
+                  <button className="btn btn-primary btn-sm" onClick={() => void act(() => api(`/projects/${p.id}/proposals/${x.id}/decision`, { method: 'POST', body: { decision: 'accept' } }), 'Proposition acceptée')}>Accepter</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setRefuse(x)}>Refuser</button>
+                </>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <p className="text-xs text-slate">Le responsable du projet et le PDG gèrent les membres ; le Coordinateur propose. Les fondateurs voient tous les projets ; les invités internes ne voient que ceux où ils sont membres.</p>
+      {refuse && <FormModal title="Refuser la proposition" fields={[{ name: 'motive', label: 'Motif', type: 'textarea', required: true }]} danger submitLabel="Refuser" onClose={() => setRefuse(null)} onSubmit={(v) => api(`/projects/${p.id}/proposals/${refuse.id}/decision`, { method: 'POST', body: { decision: 'refuse', motive: v.motive } }).then(() => { toast.success('Proposition refusée'); void loadProposals(); void refreshProjects(); })} />}
     </div>
   );
 }
@@ -260,8 +335,6 @@ function ActivityTab({ id }: { id: string }) {
 
 export function ProjectDetail({ id, tab, taskId }: { id: string; tab?: string; taskId?: string }) {
   const { projects, refreshProjects, channels } = useApp();
-  const confirm = useConfirm();
-  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [missing, setMissing] = useState(false);
   const p = projects.find((x) => x.id === id);
@@ -280,16 +353,6 @@ export function ProjectDetail({ id, tab, taskId }: { id: string; tab?: string; t
   }
   const archived = p.status === 'archived';
   const unread = channels.find((c) => c.id === p.channelId)?.unread ?? 0;
-
-  async function setStatus(status: ProjectStatus) {
-    try { await api(`/projects/${id}`, { method: 'PATCH', body: { status } }); await refreshProjects(); toast.success(status === 'archived' ? 'Projet archivé' : 'Projet mis à jour'); }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible.'); }
-  }
-  async function remove() {
-    if (!(await confirm({ title: `Supprimer « ${p?.name} » ?`, message: 'Tâches, dossiers, fichiers et messages du projet seront supprimés définitivement.', confirmLabel: 'Supprimer', danger: true }))) return;
-    try { await api(`/projects/${id}`, { method: 'DELETE' }); await refreshProjects(); toast.success('Projet supprimé'); go('projets'); }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Suppression impossible.'); }
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -310,7 +373,7 @@ export function ProjectDetail({ id, tab, taskId }: { id: string; tab?: string; t
       />
       {archived && <p role="status" className="bg-slate-100 px-4 py-2 text-sm font-semibold text-slate">Projet archivé : consultable, mais non modifiable.</p>}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {current === 'apercu' && <Overview p={p} onEdit={() => setEditing(true)} onArchive={() => void setStatus(archived ? 'done' : 'archived')} onDelete={() => void remove()} />}
+        {current === 'apercu' && <Overview p={p} onEdit={() => setEditing(true)} onChanged={refreshProjects} />}
         {current === 'taches' && <div className="min-h-0 flex-1"><TaskBoard projectId={id} readOnly={archived} openTaskId={taskId} baseHref={`#projets/${id}/taches`} /></div>}
         {current === 'dossiers' && p.folderId && <FileBrowser key={p.folderId} rootFolderId={p.folderId} readOnly={archived} />}
         {current === 'messages' && p.channelId && <div className="min-h-0 flex-1"><ChatPanel channelId={p.channelId} active /></div>}
