@@ -1,5 +1,6 @@
 import { db, type Level, type Role } from './db.js';
 import { HttpError, type AuthUser } from './http.js';
+import { can } from './access.js';
 
 export const isStaff = (u: { role: Role }) => u.role !== 'guest';
 
@@ -12,6 +13,9 @@ export interface ProjectRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  lead_id: string | null;
+  done_at: string | null;
+  archive_motive: string;
 }
 
 export function getProject(id: string): ProjectRow {
@@ -83,10 +87,10 @@ export function channelForAccess(user: AuthUser, id: string): ChannelRow {
   return c;
 }
 
-/** Peut-on écrire dans ce salon ? (annonces = Super Admin, projet archivé = non) */
+/** Peut-on écrire dans ce salon ? (#annonces = PDG, Chargé de communication ou administrateur technique pour les avis de service ; projet archivé = non) */
 export function assertCanPost(user: AuthUser, c: ChannelRow) {
-  if (c.admin_only === 1 && user.role !== 'admin') {
-    throw new HttpError(403, 'Seul le Super Admin peut écrire dans ce salon.');
+  if (c.admin_only === 1 && !(can(user, 'announce.internal') || can(user, 'announce.service'))) {
+    throw new HttpError(403, "Ce salon est réservé aux annonces : seuls le PDG, le Chargé de communication ou l'administrateur technique (avis de service) y écrivent. Les publications officielles passent par « Communications ».");
   }
   if (c.kind === 'project' && c.project_id) projectForWrite(user, c.project_id);
 }

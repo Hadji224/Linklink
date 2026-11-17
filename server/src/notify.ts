@@ -4,13 +4,15 @@ import { emitTo } from './realtime.js';
 
 export interface NotifyInput {
   userId: string;
-  type: 'assigned' | 'mention' | 'due_soon' | 'due_today' | 'overdue' | 'meeting' | 'meeting_reminder' | 'project' | 'dm' | 'task' | 'security' | 'system';
+  type: 'assigned' | 'mention' | 'due_soon' | 'due_today' | 'overdue' | 'meeting' | 'meeting_reminder' | 'project' | 'dm' | 'task' | 'security' | 'system' | 'validation' | 'finance' | 'communication';
   title: string;
   body?: string;
   link?: string;
   /** Évite les doublons (ex. rappel du jour) : une seule notification par clé et par personne. */
   dedupeKey?: string;
   email?: boolean;
+  /** information générale, action attendue ou alerte urgente (§11.4) */
+  category?: 'info' | 'action' | 'urgent';
 }
 
 export function notify(n: NotifyInput) {
@@ -18,12 +20,13 @@ export function notify(n: NotifyInput) {
   const created = now();
   try {
     db.prepare(
-      'INSERT INTO notifications (id,user_id,type,title,body,link,dedupe_key,created_at) VALUES (?,?,?,?,?,?,?,?)',
-    ).run(id, n.userId, n.type, n.title, n.body ?? '', n.link ?? '', n.dedupeKey ?? null, created);
+      'INSERT INTO notifications (id,user_id,type,title,body,link,dedupe_key,created_at,category) VALUES (?,?,?,?,?,?,?,?,?)',
+    ).run(id, n.userId, n.type, n.title, n.body ?? '', n.link ?? '', n.dedupeKey ?? null, created, n.category ?? (n.type === 'security' ? 'urgent' : 'info'));
   } catch {
     return false; // déjà envoyée (clé de dédoublonnage)
   }
-  const notification = { id, type: n.type, title: n.title, body: n.body ?? '', link: n.link ?? '', createdAt: created, readAt: null };
+  const category = n.category ?? (n.type === 'security' ? 'urgent' : 'info');
+  const notification = { id, type: n.type, category, title: n.title, body: n.body ?? '', link: n.link ?? '', createdAt: created, readAt: null };
   emitTo([n.userId], { type: 'notification', notification });
   if (n.email !== false) {
     const u = db.prepare('SELECT email, email_notif FROM users WHERE id = ?').get(n.userId) as

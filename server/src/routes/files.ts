@@ -6,6 +6,7 @@ import { requireStaff } from '../auth.js';
 import { logActivity } from '../activity.js';
 import { db, now, tx, uid, UPLOAD_DIR, type Level } from '../db.js';
 import { HttpError, idParam, me, parse } from '../http.js';
+import { audit } from '../access.js';
 import { canSeeFolder, canViewFile, channelForAccess, folderProjectId, assertCanPost, projectForWrite, projectAudience, canSeeProject, isStaff } from '../perm.js';
 import { emitAll, emitTo } from '../realtime.js';
 import { cleanName, mimeFor, PREVIEWABLE, receiveFile, removeStored } from '../uploads.js';
@@ -147,6 +148,18 @@ filesApi.get('/files', (req, res) => {
   res.json({ files: visible.map(shapeFile) });
 });
 
+const SECRET_NAME = /(^\.env|\.pem$|\.key$|\.p12$|\.pfx$|\.kdbx$|id_rsa|id_ed25519|secret|password|mot[-_ ]?de[-_ ]?passe|credential)/i;
+function isInfraFolder(folderId: string): boolean {
+  let id: string | null = folderId;
+  for (let i = 0; id && i < 50; i++) {
+    const f = db.prepare('SELECT name, parent_id, project_id FROM folders WHERE id = ?').get(id) as { name: string; parent_id: string | null; project_id: string | null } | undefined;
+    if (!f) return false;
+    if (!f.parent_id) return f.name === 'Infrastructure' && !f.project_id;
+    id = f.parent_id;
+  }
+  return false;
+}
+
 filesApi.post('/files', receiveFile, (req, res) => {
   const file = req.file;
   if (!file) throw new HttpError(400, 'Aucun fichier reçu.');
@@ -179,6 +192,9 @@ filesApi.post('/files', receiveFile, (req, res) => {
       const target = z.string().max(80).optional().catch(undefined).parse(body.folderId) ?? (db.prepare("SELECT id FROM folders WHERE system = 'general'").get() as { id: string }).id;
       folderId = folderForWrite(req, target).id;
       projectId = folderProjectId(folderId);
+    }
+    if (isInfraFolder(folderId) && SECRET_NAME.test(name)) {
+      throw new HttpError(422, "L'espace Infrastructure ne stocke aucun secret (clés, mots de passe, fichiers .env) : utilisez un gestionnaire de secrets et décrivez ici la procédure.");
     }
     db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
       id, name, file.filename, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
@@ -228,6 +244,7 @@ filesApi.get('/files/:id/download', (req, res) => {
   if (!fs.existsSync(p)) throw new HttpError(404, 'Fichier introuvable sur le serveur.');
   if (f.level === 'confidential' || f.level === 'strict') {
     logActivity(me(req), 'download', 'file', f.id, `Fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} » téléchargé`, folderProjectId(f.folder_id));
+    audit(me(req), 'security', 'file_download', 'file', f.id, `Téléchargement du fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} »`);
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.download(p, f.name); // « attachment » : jamais exécuté par le navigateur

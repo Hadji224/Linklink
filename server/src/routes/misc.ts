@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { requireAdmin } from '../auth.js';
+import { can, deny } from '../access.js';
 import { db, LOG_DIR, now, today } from '../db.js';
 import { idParam, me, parse } from '../http.js';
 import { canSeeFolder, isStaff, visibleProjectIds } from '../perm.js';
@@ -15,12 +16,12 @@ export const miscApi = Router();
 
 miscApi.get('/notifications', (req, res) => {
   const rows = db
-    .prepare('SELECT id, type, title, body, link, created_at, read_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 60')
-    .all(me(req).id) as { id: string; type: string; title: string; body: string; link: string; created_at: string; read_at: string | null }[];
+    .prepare('SELECT id, type, title, body, link, created_at, read_at, category FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 60')
+    .all(me(req).id) as { id: string; type: string; title: string; body: string; link: string; created_at: string; read_at: string | null; category: string }[];
   const unread = (db.prepare('SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL').get(me(req).id) as { n: number }).n;
   res.json({
     unread,
-    notifications: rows.map((r) => ({ id: r.id, type: r.type, title: r.title, body: r.body, link: r.link, createdAt: r.created_at, readAt: r.read_at })),
+    notifications: rows.map((r) => ({ id: r.id, type: r.type, category: r.category, title: r.title, body: r.body, link: r.link, createdAt: r.created_at, readAt: r.read_at })),
   });
 });
 
@@ -87,7 +88,8 @@ miscApi.get('/dashboard', (req, res) => {
 
 /* ----------------------- Journal d'activité (Super Admin) ----------------------- */
 
-miscApi.get('/activity', requireAdmin, (req, res) => {
+miscApi.get('/activity', (req, res) => {
+  if (!(me(req).role === 'admin' || can(me(req), 'journal.business'))) deny(me(req), 'activity_read', "Le journal d'activité est réservé à l'administrateur technique et au PDG.");
   const limit = Math.min(Number(req.query.limit) || 100, 300);
   const before = typeof req.query.before === 'string' ? req.query.before : '9999';
   const rows = db

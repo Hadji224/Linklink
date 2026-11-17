@@ -4,6 +4,8 @@ import { BACKUP_DIR, db, today } from './db.js';
 import { purgeOldLogs } from './logger.js';
 import { notify } from './notify.js';
 import { meetingAudience } from './routes/meetings.js';
+import { expireEmergency } from './routes/governance.js';
+import { runValidationReminders } from './validations.js';
 
 /** Rappels automatiques : tâches J-1 / J-0 / en retard, rendez-vous à 24 h et 1 h. Idempotent (clés de dédoublonnage). */
 export function runReminders() {
@@ -59,7 +61,7 @@ export function startJobs() {
   const safe = (fn: () => void) => () => {
     try { fn(); } catch (e) { console.error('Tâche planifiée en échec :', e); }
   };
-  const hourly = safe(() => { runReminders(); });
+  const hourly = safe(() => { runReminders(); runValidationReminders(); expireEmergency(); });
   const daily = safe(() => { runBackup(); purgeOldLogs(); });
   hourly(); daily();
   setInterval(hourly, 10 * 60_000).unref();

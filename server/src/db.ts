@@ -281,6 +281,282 @@ BEGIN SELECT RAISE(ABORT, 'Un commentaire ne peut pas être modifié'); END;
     throw e;
   }
 }
+
+// v4 — spécification fonctionnelle v1.2 : fonctions, mandats, finances, communications, journaux, accès d'urgence.
+const SCHEMA_V4 = `
+CREATE TABLE IF NOT EXISTS user_functions (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  fn          TEXT NOT NULL CHECK (fn IN ('pdg','coordinator','project_lead','infra_lead','treasurer','comms')),
+  assigned_by TEXT,
+  note        TEXT NOT NULL DEFAULT '',
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_functions_active ON user_functions(user_id, fn) WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_functions_fn ON user_functions(fn) WHERE ended_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS mandates (
+  id              TEXT PRIMARY KEY,
+  grantor_id      TEXT,
+  grantee_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scope           TEXT NOT NULL CHECK (scope IN ('technical_ops','spokesperson','validator_replacement','interim')),
+  fn              TEXT,
+  validation_type TEXT,
+  for_user_id     TEXT,
+  reason          TEXT NOT NULL DEFAULT '',
+  starts_at       TEXT NOT NULL,
+  ends_at         TEXT NOT NULL,
+  revoked_at      TEXT,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mandates_grantee ON mandates(grantee_id);
+
+CREATE TABLE IF NOT EXISTS absences (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  starts_on   TEXT NOT NULL,
+  ends_on     TEXT NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  declared_by TEXT,
+  ended_at    TEXT,
+  warned_at   TEXT,
+  created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         TEXT PRIMARY KEY,
+  category   TEXT NOT NULL CHECK (category IN ('business','security','emergency')),
+  user_id    TEXT,
+  user_name  TEXT NOT NULL DEFAULT '',
+  action     TEXT NOT NULL,
+  entity     TEXT NOT NULL DEFAULT '',
+  entity_id  TEXT NOT NULL DEFAULT '',
+  summary    TEXT NOT NULL,
+  details    TEXT NOT NULL DEFAULT '',
+  mandate_id TEXT,
+  result     TEXT NOT NULL DEFAULT 'ok' CHECK (result IN ('ok','denied')),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_cat ON audit_log(category, created_at);
+CREATE TRIGGER IF NOT EXISTS audit_immutable BEFORE UPDATE OF category, action, entity, entity_id, summary, details, mandate_id, result, created_at ON audit_log
+BEGIN SELECT RAISE(ABORT, 'Journal immuable'); END;
+CREATE TRIGGER IF NOT EXISTS audit_nodelete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'Journal immuable'); END;
+
+CREATE TABLE IF NOT EXISTS validation_rules (
+  type             TEXT PRIMARY KEY,
+  first_reminder_h INTEGER NOT NULL,
+  interval_h       INTEGER NOT NULL,
+  escalation_h     INTEGER NOT NULL,
+  updated_by       TEXT,
+  updated_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_proposals (
+  id             TEXT PRIMARY KEY,
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  action         TEXT NOT NULL CHECK (action IN ('add_member','remove_member','set_lead')),
+  target_user_id TEXT NOT NULL,
+  proposed_by    TEXT,
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','refused')),
+  decided_by     TEXT,
+  motive         TEXT NOT NULL DEFAULT '',
+  created_at     TEXT NOT NULL,
+  decided_at     TEXT
+);
+CREATE TABLE IF NOT EXISTS project_done_notes (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('postponed','cancelled')),
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, task_id)
+);
+
+CREATE TABLE IF NOT EXISTS task_dependencies (
+  id          TEXT PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  depends_on  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL,
+  UNIQUE (task_id, depends_on)
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id                   TEXT PRIMARY KEY,
+  requester_id         TEXT,
+  requester_name       TEXT NOT NULL DEFAULT '',
+  beneficiary          TEXT NOT NULL,
+  beneficiary_user_id  TEXT,
+  amount_minor         INTEGER NOT NULL CHECK (amount_minor > 0),
+  currency             TEXT NOT NULL DEFAULT 'GNF',
+  reason               TEXT NOT NULL,
+  project_id           TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  status               TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','pending','blocked','refused','awaiting_payment','paid','discrepancy','closed','cancelled')),
+  version              INTEGER NOT NULL DEFAULT 1,
+  approvals_required   INTEGER NOT NULL DEFAULT 1,
+  approved_minor       INTEGER,
+  approved_currency    TEXT,
+  approved_beneficiary TEXT,
+  justificatif         TEXT NOT NULL DEFAULT '',
+  declarative_by       TEXT,
+  cosigned_by          TEXT,
+  decision_motive      TEXT NOT NULL DEFAULT '',
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL,
+  submitted_at         TEXT,
+  closed_at            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status);
+CREATE TABLE IF NOT EXISTS expense_versions (
+  expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  version    INTEGER NOT NULL,
+  snapshot   TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (expense_id, version)
+);
+CREATE TABLE IF NOT EXISTS expense_approvals (
+  id          TEXT PRIMARY KEY,
+  expense_id  TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  approver_id TEXT,
+  approver_name TEXT NOT NULL DEFAULT '',
+  decision    TEXT NOT NULL CHECK (decision IN ('approve','refuse')),
+  motive      TEXT NOT NULL DEFAULT '',
+  mandate_id  TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS expense_payments (
+  id           TEXT PRIMARY KEY,
+  expense_id   TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  cashier_id   TEXT,
+  cashier_name TEXT NOT NULL DEFAULT '',
+  amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+  currency     TEXT NOT NULL,
+  beneficiary  TEXT NOT NULL,
+  proof        TEXT NOT NULL,
+  discrepancy  TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'recorded' CHECK (status IN ('recorded','cancelled')),
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS communications (
+  id            TEXT PRIMARY KEY,
+  author_id     TEXT,
+  author_name   TEXT NOT NULL DEFAULT '',
+  family        TEXT NOT NULL CHECK (family IN ('internal','official')),
+  kind          TEXT NOT NULL CHECK (kind IN ('announcement','service','current','project','official','technical','paid_ad','crisis')),
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','in_validation','validated','published','refused','withdrawn')),
+  version       INTEGER NOT NULL DEFAULT 1,
+  crisis        INTEGER NOT NULL DEFAULT 0,
+  review_due_at TEXT,
+  reviewed_at   TEXT,
+  review_note   TEXT NOT NULL DEFAULT '',
+  decision_motive TEXT NOT NULL DEFAULT '',
+  published_at  TEXT,
+  published_by  TEXT,
+  submitted_at  TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS communication_versions (
+  comm_id    TEXT NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  version    INTEGER NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (comm_id, version)
+);
+CREATE TABLE IF NOT EXISTS communication_validations (
+  id          TEXT PRIMARY KEY,
+  comm_id     TEXT NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  slot        TEXT NOT NULL,
+  validator_id TEXT,
+  validator_name TEXT NOT NULL DEFAULT '',
+  decision    TEXT NOT NULL CHECK (decision IN ('approve','refuse')),
+  motive      TEXT NOT NULL DEFAULT '',
+  mandate_id  TEXT,
+  created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS emergency_holders (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash     TEXT,
+  designated_by TEXT,
+  designated_at TEXT NOT NULL,
+  code_set_at   TEXT
+);
+CREATE TABLE IF NOT EXISTS emergency_sessions (
+  id            TEXT PRIMARY KEY,
+  state         TEXT NOT NULL CHECK (state IN ('pending','active','closed','expired')),
+  first_holder  TEXT NOT NULL,
+  second_holder TEXT,
+  created_at    TEXT NOT NULL,
+  activated_at  TEXT,
+  expires_at    TEXT NOT NULL,
+  closed_at     TEXT,
+  note          TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS admin_transfers (
+  id            TEXT PRIMARY KEY,
+  from_user     TEXT NOT NULL,
+  to_user       TEXT NOT NULL,
+  state         TEXT NOT NULL CHECK (state IN ('pending','verifying','done','refused')),
+  decided_by    TEXT,
+  motive        TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_actions (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  user_name    TEXT NOT NULL DEFAULT '',
+  action       TEXT NOT NULL CHECK (action IN ('suspend','reactivate')),
+  reason       TEXT NOT NULL DEFAULT '',
+  requested_by TEXT,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','refused')),
+  decided_by   TEXT,
+  motive       TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL,
+  decided_at   TEXT
+);
+`;
+if (version < 4) {
+  const hasUsers = tableExists('users') && (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n > 0;
+  if (hasUsers && version >= 2) {
+    // Copie de sécurité avant migration (retour arrière possible).
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    fs.copyFileSync(DB_FILE, path.join(BACKUP_DIR, `linklink-v3-avant-migration-v4-${Date.now()}.db`));
+  }
+  db.exec('BEGIN');
+  try {
+    db.exec(SCHEMA_V4);
+    const ucols = all('PRAGMA table_info(users)').map((c) => c['name']);
+    if (!ucols.includes('suspended_at')) db.exec('ALTER TABLE users ADD COLUMN suspended_at TEXT');
+    const pcols = all('PRAGMA table_info(projects)').map((c) => c['name']);
+    if (!pcols.includes('lead_id')) db.exec('ALTER TABLE projects ADD COLUMN lead_id TEXT REFERENCES users(id) ON DELETE SET NULL');
+    const ncols = all('PRAGMA table_info(notifications)').map((c) => c['name']);
+    if (!ncols.includes('category')) db.exec("ALTER TABLE notifications ADD COLUMN category TEXT NOT NULL DEFAULT 'info'");
+    db.exec('PRAGMA user_version = 4');
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+{
+  // Colonnes ajoutées pendant le développement de la v4 : ajout idempotent.
+  const pcols = all('PRAGMA table_info(projects)').map((c) => c['name']);
+  if (!pcols.includes('done_at')) db.exec('ALTER TABLE projects ADD COLUMN done_at TEXT');
+  if (!pcols.includes('archive_motive')) db.exec("ALTER TABLE projects ADD COLUMN archive_motive TEXT NOT NULL DEFAULT ''");
+}
 db.exec('PRAGMA foreign_keys = ON;');
 
 function importV1(old: Record<string, Row[]>) {
@@ -361,13 +637,39 @@ export const jwtSecret = () => process.env.JWT_SECRET || (getSetting('jwt_secret
 if ((db.prepare("SELECT COUNT(*) AS n FROM channels WHERE kind='channel'").get() as { n: number }).n === 0) {
   const ins = db.prepare('INSERT INTO channels (id,kind,name,description,admin_only,created_at) VALUES (?,?,?,?,?,?)');
   ins.run(uid(), 'channel', 'général', "Discussions de toute l'équipe", 0, now());
-  ins.run(uid(), 'channel', 'annonces', 'Annonces officielles (publiées par le Super Admin)', 1, now());
+  ins.run(uid(), 'channel', 'annonces', 'Annonces internes (publiées par le PDG ou le Chargé de communication)', 1, now());
 }
 for (const [name, system] of [['Général', 'general'], ['Messages', 'messages']] as const) {
   if (!db.prepare('SELECT 1 FROM folders WHERE system = ?').get(system)) {
     db.prepare('INSERT INTO folders (id,name,system,created_at) VALUES (?,?,?,?)').run(uid(), name, system, now());
   }
 }
+
+// Règles de relance par défaut (§10) : 1re relance 24 h, intervalle 48 h, escalade 120 h.
+for (const type of ['expense', 'archive', 'communication', 'account']) {
+  db.prepare('INSERT OR IGNORE INTO validation_rules (type,first_reminder_h,interval_h,escalation_h,updated_at) VALUES (?,?,?,?,?)').run(type, 24, 48, 120, now());
+}
+
+// Dossier « Infrastructure » : refuse les fichiers dont le nom évoque un secret (§11). Identifié par un réglage, sans toucher à la contrainte de la table.
+if (!getSetting('infra_folder_id') || !db.prepare('SELECT 1 FROM folders WHERE id = ?').get(getSetting('infra_folder_id') as string)) {
+  const id = uid();
+  db.prepare('INSERT INTO folders (id,name,created_at) VALUES (?,?,?)').run(id, 'Infrastructure', now());
+  setSetting('infra_folder_id', id);
+}
+
+/** Si aucun PDG n'existe encore, l'administrateur technique (créateur de l'instance) reçoit la fonction PDG, de façon journalisée. */
+export function ensureBootstrapPdg() {
+  const hasPdg = db.prepare("SELECT 1 FROM user_functions f JOIN users u ON u.id = f.user_id WHERE f.fn = 'pdg' AND f.ended_at IS NULL AND u.suspended_at IS NULL").get();
+  if (hasPdg) return;
+  const admin = db.prepare("SELECT id, name FROM users WHERE role = 'admin' AND suspended_at IS NULL ORDER BY created_at LIMIT 1").get() as { id: string; name: string } | undefined;
+  if (!admin) return;
+  db.prepare('INSERT INTO user_functions (id,user_id,fn,assigned_by,note,started_at) VALUES (?,?,?,?,?,?)').run(uid(), admin.id, 'pdg', null, "Amorçage : aucun PDG n'existait, l'administrateur technique tient la fonction par défaut", now());
+  db.prepare("INSERT INTO audit_log (id,category,user_id,user_name,action,entity,entity_id,summary,details,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    uid(), 'business', admin.id, admin.name, 'function', 'user', admin.id,
+    `Fonction PDG attribuée à ${admin.name} par défaut (aucun PDG n'existait) ; à transférer dès qu'un fondateur est désigné.`, "Décision de cumul : amorçage de l'instance", now(),
+  );
+}
+ensureBootstrapPdg();
 
 export interface UserRow {
   id: string;
@@ -377,6 +679,7 @@ export interface UserRow {
   role: Role;
   token_version: number;
   email_notif: number;
+  suspended_at: string | null;
   consented_at: string | null;
   created_at: string;
 }
