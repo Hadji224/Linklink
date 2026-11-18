@@ -1,3 +1,4 @@
+import 'express-async-errors';
 import compression from 'compression';
 import express from 'express';
 import fs from 'node:fs';
@@ -7,6 +8,9 @@ import { getSetting } from './db.js';
 import { startJobs } from './jobs.js';
 import { attachRealtime } from './realtime.js';
 import { api, errorHandler } from './routes/index.js';
+
+// Un échec ponctuel (base de données injoignable...) ne doit pas arrêter le serveur.
+process.on('unhandledRejection', (e) => console.error('Promesse rejetée non gérée :', e));
 
 const PORT = Number(process.env.PORT ?? 3000);
 const WEB_DIST = path.resolve(import.meta.dirname, '../../web/dist');
@@ -66,10 +70,10 @@ if (fs.existsSync(path.join(WEB_DIST, 'index.html'))) {
 const server = http.createServer(app);
 attachRealtime(server);
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`LinkLink : http://localhost:${PORT}`);
-  console.log(`Code d'invitation (Fondateurs) : ${getSetting('invite_code')}`);
-  console.log(`Code d'invitation (Invités internes) : ${getSetting('guest_invite_code')}`);
+  console.log(`Code d'invitation (Fondateurs) : ${(await getSetting('invite_code'))}`);
+  console.log(`Code d'invitation (Invités internes) : ${(await getSetting('guest_invite_code'))}`);
   console.log("(Le tout premier compte créé devient Administrateur technique, PDG de démarrage.)");
   startJobs();
 });

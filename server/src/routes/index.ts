@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { requireAuth } from '../auth.js';
 import { accessLogger } from '../logger.js';
 import { HttpError } from '../http.js';
+import { serializeWrites } from '../writelock.js';
 import { accountApi, publicApi } from './auth.js';
 import { channelsApi } from './channels.js';
 import { communicationsApi } from './communications.js';
@@ -15,6 +16,7 @@ import { tasksApi } from './tasks.js';
 
 export const api = Router();
 
+api.use(serializeWrites);
 api.use(publicApi);
 api.use(requireAuth);
 api.use(accessLogger);

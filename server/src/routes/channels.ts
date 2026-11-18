@@ -8,6 +8,7 @@ import { findMentions } from '../mentions.js';
 import { notify } from '../notify.js';
 import { assertCanPost, canAccessChannel, channelAudience, channelForAccess, getChannel, type ChannelRow } from '../perm.js';
 import { emitAll, emitTo } from '../realtime.js';
+import { filterA, mapA } from "../async.js";
 
 export const channelsApi = Router();
 
@@ -33,43 +34,43 @@ export function shapeMessage(r: MessageJoinRow) {
   };
 }
 
-export const loadMessage = (id: string) => shapeMessage(db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(id) as unknown as MessageJoinRow);
+export const loadMessage = async (id: string) => shapeMessage(await db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(id) as unknown as MessageJoinRow);
 
 /** Enregistre un message, le diffuse au bon public et notifie les personnes citées. */
-export function postMessage(channel: ChannelRow, user: { id: string; name: string }, body: string, fileId: string | null = null) {
+export async function postMessage(channel: ChannelRow, user: { id: string; name: string }, body: string, fileId: string | null = null) {
   const id = uid();
-  db.prepare('INSERT INTO messages (id,channel_id,user_id,body,file_id,created_at) VALUES (?,?,?,?,?,?)').run(id, channel.id, user.id, body, fileId, now());
-  db.prepare(
-    `INSERT INTO channel_reads (channel_id,user_id,last_read_at) VALUES (?,?,?)
+  await db.prepare('INSERT INTO messages (id,channel_id,user_id,body,file_id,created_at) VALUES (?,?,?,?,?,?)').run(id, channel.id, user.id, body, fileId, now());
+  await db.prepare(
+        `INSERT INTO channel_reads (channel_id,user_id,last_read_at) VALUES (?,?,?)
      ON CONFLICT(channel_id,user_id) DO UPDATE SET last_read_at = excluded.last_read_at`,
-  ).run(channel.id, user.id, now());
-  const message = loadMessage(id);
-  const audience = channelAudience(channel);
+      ).run(channel.id, user.id, now());
+  const message = await loadMessage(id);
+  const audience = await channelAudience(channel);
   emitTo(audience, { type: 'message', message });
   if (channel.kind !== 'dm' && body) {
-    for (const m of findMentions(body, audience)) {
+    for (const m of (await findMentions(body, audience))) {
       if (m !== user.id) {
-        notify({ userId: m, type: 'mention', title: `${user.name} vous a mentionné dans #${channel.name}`, body: body.slice(0, 140), link: '#messages', email: false });
+        await notify({ userId: m, type: 'mention', title: `${user.name} vous a mentionné dans #${channel.name}`, body: body.slice(0, 140), link: '#messages', email: false });
       }
     }
   }
   return message;
 }
 
-function channelShape(c: ChannelRow, userId: string) {
+async function channelShape(c: ChannelRow, userId: string) {
   const peerId = c.kind === 'dm' ? (c.dm_a === userId ? c.dm_b : c.dm_a) : null;
-  const peer = peerId ? (db.prepare('SELECT id, name FROM users WHERE id = ?').get(peerId) as { id: string; name: string } | undefined) : undefined;
+  const peer = peerId ? (await db.prepare('SELECT id, name FROM users WHERE id = ?').get(peerId) as { id: string; name: string } | undefined) : undefined;
   const unread = (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM messages m
+    await db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM messages m
          WHERE m.channel_id = ? AND m.user_id <> ?
            AND m.created_at > COALESCE((SELECT last_read_at FROM channel_reads WHERE channel_id = ? AND user_id = ?),
                                        (SELECT created_at FROM users WHERE id = ?))`,
-      )
-      .get(c.id, userId, c.id, userId, userId) as { n: number }
+            )
+            .get(c.id, userId, c.id, userId, userId) as { n: number }
   ).n;
-  const last = db.prepare('SELECT created_at FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT 1').get(c.id) as { created_at: string } | undefined;
+  const last = await db.prepare('SELECT created_at FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT 1').get(c.id) as { created_at: string } | undefined;
   return {
     id: c.id,
     kind: c.kind,
@@ -83,19 +84,19 @@ function channelShape(c: ChannelRow, userId: string) {
   };
 }
 
-export function unreadByChannel(user: AuthUser) {
-  const rows = db.prepare('SELECT * FROM channels').all() as unknown as ChannelRow[];
-  return rows.filter((c) => canAccessChannel(user, c)).map((c) => channelShape(c, user.id)).filter((c) => c.unread > 0);
+export async function unreadByChannel(user: AuthUser) {
+  const rows = await db.prepare('SELECT * FROM channels').all() as unknown as ChannelRow[];
+  return (await mapA((await filterA(rows, async (c) => await canAccessChannel(user, c))), async (c) => await channelShape(c, user.id))).filter((c) => c.unread > 0);
 }
 
-channelsApi.get('/channels', (req, res) => {
-  const rows = db.prepare('SELECT * FROM channels ORDER BY admin_only DESC, name').all() as unknown as ChannelRow[];
-  const visible = rows.filter((c) => canAccessChannel(me(req), c)).map((c) => channelShape(c, me(req).id));
+channelsApi.get('/channels', async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM channels ORDER BY admin_only DESC, name').all() as unknown as ChannelRow[];
+  const visible = await mapA((await filterA(rows, async (c) => await canAccessChannel(me(req), c))), async (c) => await channelShape(c, me(req).id));
   visible.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
   res.json({ channels: visible });
 });
 
-channelsApi.post('/channels', requireAdmin, (req, res) => {
+channelsApi.post('/channels', requireAdmin, async (req, res) => {
   const input = parse(
     z.object({
       name: z.string().trim().toLowerCase().min(2, 'Le nom doit faire au moins 2 caractères.').max(30).regex(/^[\p{L}\p{N}-]+$/u, 'Lettres, chiffres et tirets uniquement.'),
@@ -104,53 +105,53 @@ channelsApi.post('/channels', requireAdmin, (req, res) => {
     }),
     req.body,
   );
-  if (db.prepare("SELECT 1 FROM channels WHERE name = ? AND kind = 'channel'").get(input.name)) throw new HttpError(409, 'Ce salon existe déjà.');
+  if ((await db.prepare("SELECT 1 FROM channels WHERE name = ? AND kind = 'channel'").get(input.name))) throw new HttpError(409, 'Ce salon existe déjà.');
   const id = uid();
-  db.prepare('INSERT INTO channels (id,kind,name,description,admin_only,created_at) VALUES (?,?,?,?,?,?)').run(id, 'channel', input.name, input.description, input.adminOnly ? 1 : 0, now());
-  logActivity(me(req), 'create', 'channel', id, `Salon #${input.name} créé`);
+  await db.prepare('INSERT INTO channels (id,kind,name,description,admin_only,created_at) VALUES (?,?,?,?,?,?)').run(id, 'channel', input.name, input.description, input.adminOnly ? 1 : 0, now());
+  await logActivity(me(req), 'create', 'channel', id, `Salon #${input.name} créé`);
   emitAll({ type: 'channel' });
-  res.status(201).json({ channel: channelShape(getChannel(id), me(req).id) });
+  res.status(201).json({ channel: (await channelShape((await getChannel(id)), me(req).id)) });
 });
 
 // Messages directs : crée (ou retrouve) la conversation entre deux personnes.
-channelsApi.post('/dms', (req, res) => {
+channelsApi.post('/dms', async (req, res) => {
   const { userId } = parse(z.object({ userId: z.string() }), req.body);
   if (userId === me(req).id) throw new HttpError(400, 'Choisissez une autre personne.');
-  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) throw new HttpError(404, 'Membre introuvable.');
+  if (!(await db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId))) throw new HttpError(404, 'Membre introuvable.');
   const [a, b] = [me(req).id, userId].sort() as [string, string];
-  let c = db.prepare("SELECT * FROM channels WHERE kind='dm' AND dm_a = ? AND dm_b = ?").get(a, b) as unknown as ChannelRow | undefined;
+  let c = await db.prepare("SELECT * FROM channels WHERE kind='dm' AND dm_a = ? AND dm_b = ?").get(a, b) as unknown as ChannelRow | undefined;
   if (!c) {
     const id = uid();
-    db.prepare("INSERT INTO channels (id,kind,name,dm_a,dm_b,created_at) VALUES (?, 'dm', 'dm', ?, ?, ?)").run(id, a, b, now());
-    c = getChannel(id);
+    await db.prepare("INSERT INTO channels (id,kind,name,dm_a,dm_b,created_at) VALUES (?, 'dm', 'dm', ?, ?, ?)").run(id, a, b, now());
+    c = (await getChannel(id));
     emitTo([a, b], { type: 'channel', channelId: id });
   }
-  res.json({ channel: channelShape(c, me(req).id) });
+  res.json({ channel: (await channelShape(c, me(req).id)) });
 });
 
-channelsApi.get('/channels/:id/messages', (req, res) => {
-  const channel = channelForAccess(me(req), idParam(req));
+channelsApi.get('/channels/:id/messages', async (req, res) => {
+  const channel = await channelForAccess(me(req), idParam(req));
   const before = typeof req.query.before === 'string' ? req.query.before : undefined;
   const rows = (
     before
-      ? db.prepare(`${MESSAGE_SELECT} WHERE m.channel_id = ? AND m.created_at < ? ORDER BY m.created_at DESC LIMIT 50`).all(channel.id, before)
-      : db.prepare(`${MESSAGE_SELECT} WHERE m.channel_id = ? ORDER BY m.created_at DESC LIMIT 50`).all(channel.id)
+      ? (await db.prepare(`${MESSAGE_SELECT} WHERE m.channel_id = ? AND m.created_at < ? ORDER BY m.created_at DESC LIMIT 50`).all(channel.id, before))
+      : (await db.prepare(`${MESSAGE_SELECT} WHERE m.channel_id = ? ORDER BY m.created_at DESC LIMIT 50`).all(channel.id))
   ) as unknown as MessageJoinRow[];
   res.json({ messages: rows.reverse().map(shapeMessage), hasMore: rows.length === 50 });
 });
 
-channelsApi.post('/channels/:id/messages', (req, res) => {
-  const channel = channelForAccess(me(req), idParam(req));
+channelsApi.post('/channels/:id/messages', async (req, res) => {
+  const channel = await channelForAccess(me(req), idParam(req));
   const { body } = parse(z.object({ body: z.string().trim().min(1, 'Message vide.').max(4000, 'Message trop long.') }), req.body);
-  assertCanPost(me(req), channel);
-  res.status(201).json({ message: postMessage(channel, me(req), body) });
+  await assertCanPost(me(req), channel);
+  res.status(201).json({ message: (await postMessage(channel, me(req), body)) });
 });
 
-channelsApi.post('/channels/:id/read', (req, res) => {
-  const channel = channelForAccess(me(req), idParam(req));
-  db.prepare(
-    `INSERT INTO channel_reads (channel_id,user_id,last_read_at) VALUES (?,?,?)
+channelsApi.post('/channels/:id/read', async (req, res) => {
+  const channel = await channelForAccess(me(req), idParam(req));
+  await db.prepare(
+        `INSERT INTO channel_reads (channel_id,user_id,last_read_at) VALUES (?,?,?)
      ON CONFLICT(channel_id,user_id) DO UPDATE SET last_read_at = excluded.last_read_at`,
-  ).run(channel.id, me(req).id, now());
+      ).run(channel.id, me(req).id, now());
   res.json({ ok: true });
 });

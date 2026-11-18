@@ -1,6 +1,7 @@
 import { db, now } from './db.js';
 import { actsAs, isAvailable, isOrphan, isOverdue, isProjectLead, isSuspended, type Fn } from './access.js';
 import { HttpError } from './http.js';
+import { filterA, someA } from "./async.js";
 
 /* ---------------------------------------------------------------------------------------------
  * Workflow de communication (spécification v1.2 §8). Circuits (§8.2) : chaque case (« slot »)
@@ -32,46 +33,46 @@ export const KIND_FR: Record<CommKind, string> = {
   official: 'Annonce officielle / partenariat', technical: 'Sujet technique sensible', paid_ad: 'Publicité payante', crisis: 'Communication de crise',
 };
 
-export function getComm(id: string): CommRow {
-  const c = db.prepare('SELECT * FROM communications WHERE id = ?').get(id) as unknown as CommRow | undefined;
+export async function getComm(id: string): Promise<CommRow> {
+  const c = await db.prepare('SELECT * FROM communications WHERE id = ?').get(id) as unknown as CommRow | undefined;
   if (!c) throw new HttpError(404, 'Communication introuvable.');
   return c;
 }
 
-export const validationsOf = (id: string) => db.prepare('SELECT * FROM communication_validations WHERE comm_id = ? ORDER BY created_at, rowid').all(id) as unknown as ValidationRow[];
+export const validationsOf = async (id: string) => await db.prepare('SELECT * FROM communication_validations WHERE comm_id = ? ORDER BY created_at, rowid').all(id) as unknown as ValidationRow[];
 
 export function slotsOf(c: Pick<CommRow, 'kind'>): Slot[] {
   return (CIRCUITS as Record<string, Slot[]>)[c.kind] ?? [];
 }
 
-const currentApprovals = (c: CommRow) => validationsOf(c.id).filter((v) => v.version === c.version && v.decision === 'approve');
-export const openSlots = (c: CommRow): Slot[] => {
-  const filled = new Set(currentApprovals(c).map((v) => v.slot));
+const currentApprovals = async (c: CommRow) => (await validationsOf(c.id)).filter((v) => v.version === c.version && v.decision === 'approve');
+export const openSlots = async (c: CommRow): Promise<Slot[]> => {
+  const filled = new Set((await currentApprovals(c)).map((v) => v.slot));
   return slotsOf(c).filter((s) => !filled.has(s));
 };
 
 /** Cette personne peut-elle remplir cette case ? (fonction, ou mandat de remplacement valide) */
-export function qualifiesFor(userId: string, slot: Slot, c: CommRow): { ok: boolean; mandateId: string | null } {
-  if (isSuspended(userId)) return { ok: false, mandateId: null };
-  const overdue = isOverdue('communication', c.submitted_at);
+export async function qualifiesFor(userId: string, slot: Slot, c: CommRow): Promise<{ ok: boolean; mandateId: string | null }> {
+  if ((await isSuspended(userId))) return { ok: false, mandateId: null };
+  const overdue = await isOverdue('communication', c.submitted_at);
   if (slot === 'project_lead') {
-    if (c.project_id && isProjectLead(userId, c.project_id)) return { ok: true, mandateId: null };
-    if (c.project_id && isOrphan(c.project_id)) return actsAs(userId, 'project_lead', 'communication', true);
+    if (c.project_id && (await isProjectLead(userId, c.project_id))) return { ok: true, mandateId: null };
+    if (c.project_id && (await isOrphan(c.project_id))) return await actsAs(userId, 'project_lead', 'communication', true);
     return { ok: false, mandateId: null };
   }
-  return actsAs(userId, slot as Fn, 'communication', overdue);
+  return await actsAs(userId, slot as Fn, 'communication', overdue);
 }
 
 /** Case que cette personne remplirait maintenant, avec les règles d'indépendance (§8.4). */
-export function slotFor(userId: string, c: CommRow): { slot: Slot; mandateId: string | null } | { error: string } {
-  const open = openSlots(c);
+export async function slotFor(userId: string, c: CommRow): Promise<{ slot: Slot; mandateId: string | null } | { error: string }> {
+  const open = await openSlots(c);
   if (!open.length) return { error: 'Toutes les validations sont déjà obtenues.' };
-  const already = currentApprovals(c).some((v) => v.validator_id === userId);
+  const already = (await currentApprovals(c)).some((v) => v.validator_id === userId);
   if (already) return { error: 'Vous avez déjà validé cette version : un validateur indépendant est requis pour les autres étapes.' };
   let sawAuthor = false;
   for (const slot of open) {
     if (c.author_id === userId && slot !== 'comms') { sawAuthor = true; continue; }
-    const q = qualifiesFor(userId, slot, c);
+    const q = await qualifiesFor(userId, slot, c);
     if (q.ok) return { slot, mandateId: q.mandateId };
   }
   if (sawAuthor) return { error: "L'auteur ne peut pas valider les autres étapes de son propre contenu : un validateur indépendant est requis." };
@@ -79,17 +80,17 @@ export function slotFor(userId: string, c: CommRow): { slot: Slot; mandateId: st
 }
 
 /** Une case ouverte sans aucune personne disponible = validation bloquée. */
-export function blockedSlots(c: CommRow): Slot[] {
+export async function blockedSlots(c: CommRow): Promise<Slot[]> {
   if (c.status !== 'in_validation') return [];
-  const users = db.prepare("SELECT id FROM users WHERE suspended_at IS NULL AND role <> 'guest'").all() as { id: string }[];
-  const approvedBy = new Set(currentApprovals(c).map((v) => v.validator_id));
-  return openSlots(c).filter((slot) => !users.some((u) => {
-    if (approvedBy.has(u.id) || !isAvailable(u.id) && !actsAs(u.id, slot as Fn, 'communication', true).ok) return false;
-    if (c.author_id === u.id && slot !== 'comms') return false;
-    return qualifiesFor(u.id, slot, c).ok;
-  }));
+  const users = await db.prepare("SELECT id FROM users WHERE suspended_at IS NULL AND role <> 'guest'").all() as { id: string }[];
+  const approvedBy = new Set((await currentApprovals(c)).map((v) => v.validator_id));
+  return filterA(await openSlots(c), async (slot) => !(await someA(users, async (u) => {
+      if (approvedBy.has(u.id) || !(await isAvailable(u.id)) && !(await actsAs(u.id, slot as Fn, 'communication', true)).ok) return false;
+      if (c.author_id === u.id && slot !== 'comms') return false;
+      return (await qualifiesFor(u.id, slot, c)).ok;
+    })));
 }
 
-export function snapshotVersion(c: CommRow) {
-  db.prepare('INSERT OR REPLACE INTO communication_versions (comm_id,version,title,body,created_at) VALUES (?,?,?,?,?)').run(c.id, c.version, c.title, c.body, now());
+export async function snapshotVersion(c: CommRow) {
+  await db.prepare('INSERT INTO communication_versions (comm_id,version,title,body,created_at) VALUES (?,?,?,?,?) ON CONFLICT (comm_id,version) DO UPDATE SET title = excluded.title, body = excluded.body, created_at = excluded.created_at').run(c.id, c.version, c.title, c.body, now());
 }

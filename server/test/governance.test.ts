@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { Client, startServer, type Srv } from './helpers.js';
 
@@ -14,7 +13,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 const errOf = (r: { data: any }) => String(r.data?.error ?? r.data?.message ?? '');
 const login = async (c: Client, email: string) => { c.token = (await c.post('/auth/login', { email, password: 'motdepasse123' })).data.token; };
-const sql = (q: string, ...args: any[]) => { const d = new DatabaseSync(path.join(srv.dataDir, 'linklink.db')); try { return d.prepare(q).run(...args); } finally { d.close(); } };
+const sql = (q: string, ...args: any[]) => srv.sql(q, ...args);
 const notifs = async (c: Client) => (await c.get('/notifications')).data.notifications as any[];
 
 beforeAll(async () => {
@@ -69,8 +68,8 @@ describe('AC — fonctions et cumuls (§3, §4)', () => {
   it('les refus sont journalisés (sécurité) et le journal est immuable en base', async () => {
     const log = (await A.get('/journal/security')).data.entries as any[];
     expect(log.some((e) => e.result === 'denied')).toBe(true);
-    expect(() => sql("UPDATE audit_log SET summary = 'trafiqué'")).toThrow(/immuable/);
-    expect(() => sql('DELETE FROM audit_log')).toThrow(/immuable/);
+    await expect(sql("UPDATE audit_log SET summary = 'trafiqué'")).rejects.toThrow(/immuable/);
+    await expect(sql('DELETE FROM audit_log')).rejects.toThrow(/immuable/);
   });
   it("changement de rôle d'accès : jamais de promotion/rétrogradation de l'administrateur par simple clic", async () => {
     expect((await A.patch(`/members/${M.user.id}/role`, { role: 'admin' })).status).toBe(400);
@@ -277,7 +276,7 @@ describe('MI — absences, mandats, relances et validations bloquées (§9, §10
   });
   it('rappel déclenché au démarrage pour une validation en retard, sans doublon', async () => {
     const id = (await M.post('/expenses', { beneficiary: 'Retard SA', amount: 20000, currency: 'GNF', reason: 'Test relance', submit: true })).data.expense.id;
-    sql('UPDATE expenses SET submitted_at = ? WHERE id = ?', new Date(Date.now() - 30 * 3600_000).toISOString(), id);
+    await sql('UPDATE expenses SET submitted_at = ? WHERE id = ?', new Date(Date.now() - 30 * 3600_000).toISOString(), id);
     await srv.restart();
     await login(P, 'p@g.test');
     const n1 = (await notifs(P)).filter((n) => n.title.includes('Validation en attente'));

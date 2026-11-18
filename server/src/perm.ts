@@ -18,40 +18,40 @@ export interface ProjectRow {
   archive_motive: string;
 }
 
-export function getProject(id: string): ProjectRow {
-  const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as ProjectRow | undefined;
+export async function getProject(id: string): Promise<ProjectRow> {
+  const p = await db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as ProjectRow | undefined;
   if (!p) throw new HttpError(404, 'Projet introuvable.');
   return p;
 }
 
-export function isProjectMember(userId: string, projectId: string) {
-  return !!db.prepare('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?').get(projectId, userId);
+export async function isProjectMember(userId: string, projectId: string) {
+  return !!(await db.prepare('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?').get(projectId, userId));
 }
 
 /** Super Admin et Fondateurs voient tous les projets ; un invité seulement ceux dont il est membre. */
-export function canSeeProject(user: AuthUser, projectId: string) {
-  return isStaff(user) ? !!db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId) : isProjectMember(user.id, projectId);
+export async function canSeeProject(user: AuthUser, projectId: string) {
+  return isStaff(user) ? !!(await db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId)) : (await isProjectMember(user.id, projectId));
 }
 
-export function visibleProjectIds(user: AuthUser): string[] {
+export async function visibleProjectIds(user: AuthUser): Promise<string[]> {
   const rows = (
     isStaff(user)
-      ? db.prepare('SELECT id FROM projects').all()
-      : db.prepare('SELECT project_id AS id FROM project_members WHERE user_id = ?').all(user.id)
+      ? (await db.prepare('SELECT id FROM projects').all())
+      : (await db.prepare('SELECT project_id AS id FROM project_members WHERE user_id = ?').all(user.id))
   ) as { id: string }[];
   return rows.map((r) => r.id);
 }
 
 /** Lecture d'un projet (404 si invisible : on ne révèle pas son existence). */
-export function projectForRead(user: AuthUser, id: string): ProjectRow {
-  const p = getProject(id);
-  if (!canSeeProject(user, id)) throw new HttpError(404, 'Projet introuvable.');
+export async function projectForRead(user: AuthUser, id: string): Promise<ProjectRow> {
+  const p = await getProject(id);
+  if (!(await canSeeProject(user, id))) throw new HttpError(404, 'Projet introuvable.');
   return p;
 }
 
 /** Écriture dans un projet : refusée s'il est archivé. */
-export function projectForWrite(user: AuthUser, id: string): ProjectRow {
-  const p = projectForRead(user, id);
+export async function projectForWrite(user: AuthUser, id: string): Promise<ProjectRow> {
+  const p = await projectForRead(user, id);
   if (p.status === 'archived') throw new HttpError(409, 'Ce projet est archivé : il est consultable mais non modifiable.');
   return p;
 }
@@ -67,51 +67,51 @@ export interface ChannelRow {
   dm_b: string | null;
 }
 
-export function getChannel(id: string): ChannelRow {
-  const c = db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as unknown as ChannelRow | undefined;
+export async function getChannel(id: string): Promise<ChannelRow> {
+  const c = await db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as unknown as ChannelRow | undefined;
   if (!c) throw new HttpError(404, 'Salon introuvable.');
   return c;
 }
 
 const GUEST_CHANNELS = new Set(['général', 'annonces']);
 
-export function canAccessChannel(user: AuthUser, c: ChannelRow) {
+export async function canAccessChannel(user: AuthUser, c: ChannelRow) {
   if (c.kind === 'dm') return c.dm_a === user.id || c.dm_b === user.id;
-  if (c.kind === 'project') return !!c.project_id && canSeeProject(user, c.project_id);
+  if (c.kind === 'project') return !!c.project_id && (await canSeeProject(user, c.project_id));
   return isStaff(user) || GUEST_CHANNELS.has(c.name);
 }
 
-export function channelForAccess(user: AuthUser, id: string): ChannelRow {
-  const c = getChannel(id);
-  if (!canAccessChannel(user, c)) throw new HttpError(404, 'Salon introuvable.');
+export async function channelForAccess(user: AuthUser, id: string): Promise<ChannelRow> {
+  const c = await getChannel(id);
+  if (!(await canAccessChannel(user, c))) throw new HttpError(404, 'Salon introuvable.');
   return c;
 }
 
 /** Peut-on écrire dans ce salon ? (#annonces = PDG, Chargé de communication ou administrateur technique pour les avis de service ; projet archivé = non) */
-export function assertCanPost(user: AuthUser, c: ChannelRow) {
-  if (c.admin_only === 1 && !(can(user, 'announce.internal') || can(user, 'announce.service'))) {
+export async function assertCanPost(user: AuthUser, c: ChannelRow) {
+  if (c.admin_only === 1 && !((await can(user, 'announce.internal')) || (await can(user, 'announce.service')))) {
     throw new HttpError(403, "Ce salon est réservé aux annonces : seuls le PDG, le Chargé de communication ou l'administrateur technique (avis de service) y écrivent. Les publications officielles passent par « Communications ».");
   }
-  if (c.kind === 'project' && c.project_id) projectForWrite(user, c.project_id);
+  if (c.kind === 'project' && c.project_id) await projectForWrite(user, c.project_id);
 }
 
 /** Identifiants des utilisateurs qui peuvent lire un salon (pour le temps réel et les notifications). */
-export function channelAudience(c: ChannelRow): string[] {
+export async function channelAudience(c: ChannelRow): Promise<string[]> {
   if (c.kind === 'dm') return [c.dm_a, c.dm_b].filter(Boolean) as string[];
-  const users = db.prepare('SELECT id, role FROM users').all() as { id: string; role: Role }[];
+  const users = await db.prepare('SELECT id, role FROM users').all() as { id: string; role: Role }[];
   if (c.kind === 'project' && c.project_id) {
     const members = new Set(
-      (db.prepare('SELECT user_id FROM project_members WHERE project_id = ?').all(c.project_id) as { user_id: string }[]).map((r) => r.user_id),
+      (await db.prepare('SELECT user_id FROM project_members WHERE project_id = ?').all(c.project_id) as { user_id: string }[]).map((r) => r.user_id),
     );
     return users.filter((u) => u.role !== 'guest' || members.has(u.id)).map((u) => u.id);
   }
   return users.filter((u) => u.role !== 'guest' || GUEST_CHANNELS.has(c.name)).map((u) => u.id);
 }
 
-export function projectAudience(projectId: string): string[] {
-  const users = db.prepare('SELECT id, role FROM users').all() as { id: string; role: Role }[];
+export async function projectAudience(projectId: string): Promise<string[]> {
+  const users = await db.prepare('SELECT id, role FROM users').all() as { id: string; role: Role }[];
   const members = new Set(
-    (db.prepare('SELECT user_id FROM project_members WHERE project_id = ?').all(projectId) as { user_id: string }[]).map((r) => r.user_id),
+    (await db.prepare('SELECT user_id FROM project_members WHERE project_id = ?').all(projectId) as { user_id: string }[]).map((r) => r.user_id),
   );
   return users.filter((u) => u.role !== 'guest' || members.has(u.id)).map((u) => u.id);
 }
@@ -123,11 +123,11 @@ export interface FileAccessRow {
   folder_id: string;
 }
 
-export function folderProjectId(folderId: string): string | null {
+export async function folderProjectId(folderId: string): Promise<string | null> {
   // Remonte l'arborescence jusqu'à la racine d'un projet éventuel.
   let id: string | null = folderId;
   for (let i = 0; id && i < 50; i++) {
-    const f = db.prepare('SELECT parent_id, project_id FROM folders WHERE id = ?').get(id) as
+    const f = await db.prepare('SELECT parent_id, project_id FROM folders WHERE id = ?').get(id) as
       | { parent_id: string | null; project_id: string | null }
       | undefined;
     if (!f) return null;
@@ -144,14 +144,14 @@ export function folderProjectId(folderId: string): string | null {
  *  - confidentiel : personnes concernées (auteur, Super Admin, membres du projet) ;
  *  - strict : auteur et Super Admin uniquement.
  */
-export function canViewFile(user: AuthUser, f: FileAccessRow): boolean {
+export async function canViewFile(user: AuthUser, f: FileAccessRow): Promise<boolean> {
   if (f.channel_id) {
-    const c = db.prepare('SELECT * FROM channels WHERE id = ?').get(f.channel_id) as unknown as ChannelRow | undefined;
-    return !!c && canAccessChannel(user, c);
+    const c = await db.prepare('SELECT * FROM channels WHERE id = ?').get(f.channel_id) as unknown as ChannelRow | undefined;
+    return !!c && (await canAccessChannel(user, c));
   }
   if (user.role === 'admin' || f.user_id === user.id) return true;
-  const pid = folderProjectId(f.folder_id);
-  const member = pid ? isProjectMember(user.id, pid) : false;
+  const pid = await folderProjectId(f.folder_id);
+  const member = pid ? (await isProjectMember(user.id, pid)) : false;
   switch (f.level) {
     case 'public':
       return true;
@@ -165,10 +165,10 @@ export function canViewFile(user: AuthUser, f: FileAccessRow): boolean {
 }
 
 /** Dossier : lisible si on peut voir son projet ; les dossiers hors projet sont réservés à l'équipe. */
-export function canSeeFolder(user: AuthUser, folderId: string): boolean {
-  const pid = folderProjectId(folderId);
-  if (pid) return canSeeProject(user, pid);
-  const f = db.prepare('SELECT system FROM folders WHERE id = ?').get(folderId) as { system: string | null } | undefined;
+export async function canSeeFolder(user: AuthUser, folderId: string): Promise<boolean> {
+  const pid = await folderProjectId(folderId);
+  if (pid) return await canSeeProject(user, pid);
+  const f = await db.prepare('SELECT system FROM folders WHERE id = ?').get(folderId) as { system: string | null } | undefined;
   if (!f) return false;
   return isStaff(user) || f.system === 'general' ? true : false;
 }

@@ -25,11 +25,11 @@ export interface TaskRules {
   archived_at: string | null;
 }
 
-export function taskRole(user: Pick<AuthUser, 'id' | 'role'>, t: Pick<TaskRules, 'assignee_id' | 'created_by' | 'project_id'>): TaskRole {
-  if (hasFn(user.id, 'pdg') || isProjectLead(user.id, t.project_id)) return 'admin';
+export async function taskRole(user: Pick<AuthUser, 'id' | 'role'>, t: Pick<TaskRules, 'assignee_id' | 'created_by' | 'project_id'>): Promise<TaskRole> {
+  if ((await hasFn(user.id, 'pdg')) || (await isProjectLead(user.id, t.project_id))) return 'admin';
   if (t.created_by === user.id) return 'creator'; // créateur = assigné : le rôle le plus permissif l'emporte
   if (t.assignee_id === user.id) return 'assignee';
-  if (hasFn(user.id, 'coordinator') && user.role !== 'guest') return 'coordinator';
+  if ((await hasFn(user.id, 'coordinator')) && user.role !== 'guest') return 'coordinator';
   return 'observer';
 }
 
@@ -51,8 +51,8 @@ export interface TaskPermissions {
   unarchive: boolean;
 }
 
-export function taskPermissions(user: Pick<AuthUser, 'id' | 'role'>, t: TaskRules): TaskPermissions {
-  const role = taskRole(user, t);
+export async function taskPermissions(user: Pick<AuthUser, 'id' | 'role'>, t: TaskRules): Promise<TaskPermissions> {
+  const role = await taskRole(user, t);
   const lock = taskLock(t);
   const none: TaskPermissions = { edit: false, status: false, reassign: false, delete: false, subtask: false, archive: false, unarchive: false };
   if (role === 'admin') return { edit: true, status: true, reassign: true, delete: true, subtask: true, archive: lock !== 'archived' && t.status === 'done', unarchive: lock === 'archived' };
@@ -68,9 +68,9 @@ type DenyAction = TaskAction | 'comment';
 
 const READ_ONLY = 'Vous êtes en lecture seule sur cette tâche. Seuls le créateur, l\'assigné (statut), le coordinateur, le chef de projet et le PDG peuvent la modifier.';
 
-function reason(user: AuthUser, t: TaskRules, action: DenyAction): string {
+async function reason(user: AuthUser, t: TaskRules, action: DenyAction): Promise<string> {
   if (action === 'comment') return "Seul l'auteur du commentaire ou un admin peut le supprimer.";
-  const role = taskRole(user, t);
+  const role = await taskRole(user, t);
   const lock = taskLock(t);
   if (role === 'observer') return action === 'delete' ? 'Seuls le créateur et les admins peuvent supprimer.' : READ_ONLY;
   if (lock === 'archived') return 'Cette tâche est archivée : elle est en lecture seule (seul un admin peut la modifier).';
@@ -88,34 +88,34 @@ function reason(user: AuthUser, t: TaskRules, action: DenyAction): string {
  * notification (in-app + e-mail si configuré) au créateur et aux admins. Le journal d'accès
  * du serveur contient déjà l'utilisateur, la tâche (chemin) et le code 403.
  */
-export function denyTask(user: AuthUser, t: TaskRules, action: DenyAction, attempt: string): never {
-  const message = reason(user, t, action);
-  logActivity(user, 'denied', 'task', t.id, `Tentative refusée sur « ${t.title} » : ${attempt}`, t.project_id);
-  audit(user, 'security', 'task_denied', 'task', t.id, `Refusé : ${attempt} sur « ${t.title} »`, { result: 'denied' });
+export async function denyTask(user: AuthUser, t: TaskRules, action: DenyAction, attempt: string): Promise<never> {
+  const message = await reason(user, t, action);
+  await logActivity(user, 'denied', 'task', t.id, `Tentative refusée sur « ${t.title} » : ${attempt}`, t.project_id);
+  await audit(user, 'security', 'task_denied', 'task', t.id, `Refusé : ${attempt} sur « ${t.title} »`, { result: 'denied' });
   const hour = now().slice(0, 13);
-  const admins = [...pdgIds(), ...(db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null } | undefined ? [(db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null }).lead_id] : [])].filter((x): x is string => !!x);
+  const admins = [...(await pdgIds()), ...(await db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null } | undefined ? [(await db.prepare('SELECT lead_id FROM projects WHERE id = ?').get(t.project_id) as { lead_id: string | null }).lead_id] : [])].filter((x): x is string => !!x);
   for (const target of new Set([t.created_by, ...admins].filter((x): x is string => !!x && x !== user.id))) {
-    notify({
-      userId: target,
-      type: 'security',
-      title: `Modification refusée sur « ${t.title} »`,
-      body: `${user.name} a tenté : ${attempt}`,
-      link: `#projets/${t.project_id}/taches/${t.id}`,
-      dedupeKey: `deny:${t.id}:${user.id}:${hour}`, // une alerte par personne, tâche et heure
-    });
+    await notify({
+            userId: target,
+            type: 'security',
+            title: `Modification refusée sur « ${t.title} »`,
+            body: `${user.name} a tenté : ${attempt}`,
+            link: `#projets/${t.project_id}/taches/${t.id}`,
+            dedupeKey: `deny:${t.id}:${user.id}:${hour}`, // une alerte par personne, tâche et heure
+          });
   }
   throw new HttpError(403, message);
 }
 
-export function requireTaskPermission(user: AuthUser, t: TaskRules, action: TaskAction, attempt: string) {
-  if (!taskPermissions(user, t)[action]) denyTask(user, t, action, attempt);
+export async function requireTaskPermission(user: AuthUser, t: TaskRules, action: TaskAction, attempt: string) {
+  if (!(await taskPermissions(user, t))[action]) throw await denyTask(user, t, action, attempt);
 }
 
 /* ------------------------------ Historique (§5.3.4) ------------------------------ */
 
 export type HistoryField = 'title' | 'description' | 'status' | 'priority' | 'dueDate' | 'assignedTo' | 'tags' | 'createdBy' | 'archived';
 
-export function recordHistory(
+export async function recordHistory(
   actor: { id: string | null; name: string },
   taskId: string,
   field: HistoryField,
@@ -123,16 +123,16 @@ export function recordHistory(
   newValue: string | null,
 ) {
   const clip = (v: string | null) => (v === null ? null : v.slice(0, 500));
-  db.prepare('INSERT INTO task_history (id,task_id,user_id,user_name,field,old_value,new_value,created_at) VALUES (?,?,?,?,?,?,?,?)').run(
-    uid(), taskId, actor.id, actor.name, field, clip(oldValue), clip(newValue), now(),
-  );
+  await db.prepare('INSERT INTO task_history (id,task_id,user_id,user_name,field,old_value,new_value,created_at) VALUES (?,?,?,?,?,?,?,?)').run(
+        uid(), taskId, actor.id, actor.name, field, clip(oldValue), clip(newValue), now(),
+      );
 }
 
-export function taskHistory(taskId: string) {
+export async function taskHistory(taskId: string) {
   return (
-    db
-      .prepare('SELECT id, user_id, user_name, field, old_value, new_value, created_at FROM task_history WHERE task_id = ? ORDER BY created_at, rowid')
-      .all(taskId) as { id: string; user_id: string | null; user_name: string; field: string; old_value: string | null; new_value: string | null; created_at: string }[]
+    await db
+            .prepare('SELECT id, user_id, user_name, field, old_value, new_value, created_at FROM task_history WHERE task_id = ? ORDER BY created_at, rowid')
+            .all(taskId) as { id: string; user_id: string | null; user_name: string; field: string; old_value: string | null; new_value: string | null; created_at: string }[]
   ).map((h) => ({ id: h.id, user: h.user_name || 'Système', field: h.field, oldValue: h.old_value, newValue: h.new_value, createdAt: h.created_at }));
 }
 
@@ -143,30 +143,30 @@ export function taskHistory(taskId: string) {
  *  - les tâches qu'il a créées restent actives et passent au responsable du projet (notification aux assignés) ;
  *  - les tâches qui lui étaient assignées redeviennent « non assignées » (seul le créateur peut les réassigner).
  */
-export function handOverTasksOf(userId: string, userName: string) {
+export async function handOverTasksOf(userId: string, userName: string) {
   // Héritier : le responsable du projet s'il est disponible, sinon le PDG, sinon l'administrateur technique.
-  const fallback = pdgIds().find((id) => id !== userId) ?? (db.prepare("SELECT id FROM users WHERE role = 'admin' AND id <> ? ORDER BY created_at LIMIT 1").get(userId) as { id: string } | undefined)?.id;
-  const heirFor = (projectId: string) => {
-    const lead = projectLeadOf(projectId);
-    const id = lead && lead !== userId && isProjectLead(lead, projectId) && isAvailable(lead) ? lead : fallback;
-    return id ? ((db.prepare('SELECT id, name FROM users WHERE id = ?').get(id) as { id: string; name: string } | undefined) ?? null) : null;
+  const fallback = (await pdgIds()).find((id) => id !== userId) ?? (await db.prepare("SELECT id FROM users WHERE role = 'admin' AND id <> ? ORDER BY created_at LIMIT 1").get(userId) as { id: string } | undefined)?.id;
+  const heirFor = async (projectId: string) => {
+    const lead = await projectLeadOf(projectId);
+    const id = lead && lead !== userId && (await isProjectLead(lead, projectId)) && (await isAvailable(lead)) ? lead : fallback;
+    return id ? ((await db.prepare('SELECT id, name FROM users WHERE id = ?').get(id) as { id: string; name: string } | undefined) ?? null) : null;
   };
   const system = { id: null, name: 'Système' };
-  const created = db.prepare('SELECT id, title, project_id, assignee_id FROM tasks WHERE created_by = ?').all(userId) as { id: string; title: string; project_id: string; assignee_id: string | null }[];
+  const created = await db.prepare('SELECT id, title, project_id, assignee_id FROM tasks WHERE created_by = ?').all(userId) as { id: string; title: string; project_id: string; assignee_id: string | null }[];
   for (const t of created) {
-    const heir = heirFor(t.project_id);
-    db.prepare('UPDATE tasks SET created_by = ?, updated_at = ? WHERE id = ?').run(heir?.id ?? null, now(), t.id);
-    recordHistory(system, t.id, 'createdBy', userName, heir?.name ?? 'Administration');
+    const heir = await heirFor(t.project_id);
+    await db.prepare('UPDATE tasks SET created_by = ?, updated_at = ? WHERE id = ?').run(heir?.id ?? null, now(), t.id);
+    await recordHistory(system, t.id, 'createdBy', userName, heir?.name ?? 'Administration');
     if (t.assignee_id && t.assignee_id !== userId) {
-      notify({ userId: t.assignee_id, type: 'task', title: `Le créateur de « ${t.title} » a quitté l'équipe`, body: 'La tâche reste active et passe sous la responsabilité du responsable du projet.', link: `#projets/${t.project_id}/taches/${t.id}` });
+      await notify({ userId: t.assignee_id, type: 'task', title: `Le créateur de « ${t.title} » a quitté l'équipe`, body: 'La tâche reste active et passe sous la responsabilité du responsable du projet.', link: `#projets/${t.project_id}/taches/${t.id}` });
     }
   }
-  const assigned = db.prepare('SELECT id, title, project_id, created_by FROM tasks WHERE assignee_id = ?').all(userId) as { id: string; title: string; project_id: string; created_by: string | null }[];
+  const assigned = await db.prepare('SELECT id, title, project_id, created_by FROM tasks WHERE assignee_id = ?').all(userId) as { id: string; title: string; project_id: string; created_by: string | null }[];
   for (const t of assigned) {
-    db.prepare('UPDATE tasks SET assignee_id = NULL, updated_at = ? WHERE id = ?').run(now(), t.id);
-    recordHistory(system, t.id, 'assignedTo', userName, null);
+    await db.prepare('UPDATE tasks SET assignee_id = NULL, updated_at = ? WHERE id = ?').run(now(), t.id);
+    await recordHistory(system, t.id, 'assignedTo', userName, null);
     if (t.created_by && t.created_by !== userId) {
-      notify({ userId: t.created_by, type: 'task', title: `« ${t.title} » n'est plus assignée`, body: `${userName} a quitté l'équipe.`, link: `#projets/${t.project_id}/taches/${t.id}` });
+      await notify({ userId: t.created_by, type: 'task', title: `« ${t.title} » n'est plus assignée`, body: `${userName} a quitté l'équipe.`, link: `#projets/${t.project_id}/taches/${t.id}` });
     }
   }
 }

@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { WebSocket } from 'ws';
 import { Client, startServer, type Srv } from './helpers.js';
@@ -148,8 +147,7 @@ describe('Tâches (F-TASK)', () => {
 describe("Droits d'écriture sur les tâches (amendement v1.1 §5.3, §9.6, §16.3)", () => {
   let creator: Client, assignee: Client, observer: Client; // trois fondateurs : rôles sur la tâche
   let taskId: string;
-  const dbFile = () => path.join(srv.dataDir, 'linklink.db');
-  const sql = (q: string, ...args: any[]) => { const d = new DatabaseSync(dbFile()); try { return d.prepare(q).run(...args); } finally { d.close(); } };
+  const sql = (q: string, ...args: any[]) => srv.sql(q, ...args);
   const task = async (c: Client, id = taskId) => (await c.get(`/tasks/${id}`)).data.task;
   const notifs = async (c: Client) => (await c.get('/notifications')).data.notifications as any[];
 
@@ -251,11 +249,11 @@ describe("Droits d'écriture sur les tâches (amendement v1.1 §5.3, §9.6, §16
     expect((await observer.del(`/tasks/${taskId}/comments/${cid}`)).status).toBe(200);
     const mine = await creator.post(`/tasks/${taskId}/comments`, { body: 'Le mien' });
     expect((await admin.del(`/tasks/${taskId}/comments/${mine.data.task.comments.at(-1).id}`)).status).toBe(200);
-    expect(() => sql("UPDATE task_comments SET body = 'trafiqué'")).toThrow(/modifié/);
+    await expect(sql("UPDATE task_comments SET body = 'trafiqué'")).rejects.toThrow(/modifié/);
   });
 
   it("l'historique est immuable en base", async () => {
-    expect(() => sql("UPDATE task_history SET new_value = 'x'")).toThrow(/immuable/);
+    await expect(sql("UPDATE task_history SET new_value = 'x'")).rejects.toThrow(/immuable/);
   });
 
   it("un commentaire arrive aussi au créateur et à l'assigné ; pièces jointes : chacun supprime les siennes, l'admin celles des autres", async () => {
@@ -273,7 +271,7 @@ describe("Droits d'écriture sur les tâches (amendement v1.1 §5.3, §9.6, §16
   it("terminée depuis plus de 7 jours : verrouillée (assigné refusé), le créateur peut la rouvrir ; archivée : admin seulement", async () => {
     await assignee.patch(`/tasks/${taskId}`, { status: 'done' });
     expect((await task(creator)).lock).toBe('none');
-    sql('UPDATE tasks SET completed_at = ? WHERE id = ?', new Date(Date.now() - 8 * 86_400_000).toISOString(), taskId);
+    await sql('UPDATE tasks SET completed_at = ? WHERE id = ?', new Date(Date.now() - 8 * 86_400_000).toISOString(), taskId);
     expect((await task(creator)).lock).toBe('locked');
     const locked = await assignee.patch(`/tasks/${taskId}`, { status: 'review' });
     expect(locked.status).toBe(403);

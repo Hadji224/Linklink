@@ -1,7 +1,7 @@
 import { db, now, uid } from './db.js';
 import type { AuthUser } from './http.js';
 
-export function logActivity(
+export async function logActivity(
   user: Pick<AuthUser, 'id' | 'name'> | null,
   action: string,
   entity: string,
@@ -9,7 +9,7 @@ export function logActivity(
   summary: string,
   projectId: string | null = null,
 ) {
-  db.prepare(
-    'INSERT INTO activity_log (id,user_id,user_name,action,entity,entity_id,project_id,summary,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-  ).run(uid(), user?.id ?? null, user?.name ?? 'Système', action, entity, entityId, projectId, summary.slice(0, 300), now());
+  await db.prepare(
+        'INSERT INTO activity_log (id,user_id,user_name,action,entity,entity_id,project_id,summary,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      ).run(uid(), user?.id ?? null, user?.name ?? 'Système', action, entity, entityId, projectId, summary.slice(0, 300), now());
 }

@@ -37,13 +37,18 @@ export function disconnectUser(userId: string) {
 export function attachRealtime(server: Server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
 
-  server.on('upgrade', (req: IncomingMessage, socket, head) => {
+  server.on('upgrade', async (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== '/ws') {
       socket.destroy();
       return;
     }
-    const user = userFromToken(url.searchParams.get('token'));
+    let user: Awaited<ReturnType<typeof userFromToken>> = null;
+    try {
+      user = await userFromToken(url.searchParams.get('token'));
+    } catch (e) {
+      console.error('WebSocket : vérification impossible', e);
+    }
     if (!user) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();

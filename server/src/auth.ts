@@ -9,14 +9,14 @@ export function signToken(user: Pick<UserRow, 'id' | 'token_version'>) {
   return jwt.sign({ sub: user.id, tv: user.token_version }, jwtSecret(), { expiresIn: '30d' });
 }
 
-export function userFromToken(token: string | undefined | null): AuthUser | null {
+export async function userFromToken(token: string | undefined | null): Promise<AuthUser | null> {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, jwtSecret()) as { sub?: string; tv?: number };
     if (!payload.sub) return null;
-    const row = db
-      .prepare('SELECT id, name, email, role, token_version, suspended_at FROM users WHERE id = ?')
-      .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'token_version' | 'suspended_at'> | undefined;
+    const row = await db
+          .prepare('SELECT id, name, email, role, token_version, suspended_at FROM users WHERE id = ?')
+          .get(payload.sub) as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'token_version' | 'suspended_at'> | undefined;
     // Un changement de mot de passe ou de rôle invalide les anciennes sessions ; un compte suspendu n'a plus aucun accès.
     if (!row || row.suspended_at || (payload.tv ?? 0) !== row.token_version) return null;
     return { id: row.id, name: row.name, email: row.email, role: row.role };
@@ -25,9 +25,9 @@ export function userFromToken(token: string | undefined | null): AuthUser | null
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.header('authorization');
-  const user = userFromToken(header?.startsWith('Bearer ') ? header.slice(7) : undefined);
+  const user = await userFromToken(header?.startsWith('Bearer ') ? header.slice(7) : undefined);
   if (!user) {
     res.status(401).json({ error: 'Connexion requise.' });
     return;

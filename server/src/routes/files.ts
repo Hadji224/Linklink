@@ -11,6 +11,7 @@ import { canSeeFolder, canViewFile, channelForAccess, folderProjectId, assertCan
 import { emitAll, emitTo } from '../realtime.js';
 import { cleanName, mimeFor, PREVIEWABLE, receiveFile, removeStored } from '../uploads.js';
 import { postMessage } from './channels.js';
+import { filterA } from "../async.js";
 
 export const filesApi = Router();
 
@@ -37,40 +38,40 @@ function shapeFile(f: FileRow) {
   };
 }
 
-const loadFile = (id: string) => db.prepare(`${FILE_SELECT} WHERE f.id = ?`).get(id) as unknown as FileRow | undefined;
+const loadFile = async (id: string) => await db.prepare(`${FILE_SELECT} WHERE f.id = ?`).get(id) as unknown as FileRow | undefined;
 
-function fileForRead(req: Parameters<typeof me>[0], id: string): FileRow {
-  const f = loadFile(id);
-  if (!f || !canViewFile(me(req), f)) throw new HttpError(404, 'Fichier introuvable.');
+async function fileForRead(req: Parameters<typeof me>[0], id: string): Promise<FileRow> {
+  const f = await loadFile(id);
+  if (!f || !(await canViewFile(me(req), f))) throw new HttpError(404, 'Fichier introuvable.');
   return f;
 }
 
 /** Peut-on déposer dans ce dossier ? (lecture + projet non archivé) */
-function folderForWrite(req: Parameters<typeof me>[0], id: string) {
-  const f = db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as unknown as
+async function folderForWrite(req: Parameters<typeof me>[0], id: string) {
+  const f = await db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as unknown as
     | { id: string; name: string; parent_id: string | null; project_id: string | null; system: string | null; created_by: string | null }
     | undefined;
-  if (!f || !canSeeFolder(me(req), id)) throw new HttpError(404, 'Dossier introuvable.');
-  const pid = folderProjectId(id);
-  if (pid) projectForWrite(me(req), pid);
+  if (!f || !(await canSeeFolder(me(req), id))) throw new HttpError(404, 'Dossier introuvable.');
+  const pid = await folderProjectId(id);
+  if (pid) await projectForWrite(me(req), pid);
   else if (f.system === 'messages') throw new HttpError(400, 'Le dossier « Messages » est rempli automatiquement par les pièces jointes des salons.');
   return f;
 }
 
 /* ------------------------------- Dossiers ------------------------------- */
 
-function folderCounts() {
-  const rows = db.prepare('SELECT folder_id, COUNT(*) AS n FROM files GROUP BY folder_id').all() as { folder_id: string; n: number }[];
+async function folderCounts() {
+  const rows = await db.prepare('SELECT folder_id, COUNT(*) AS n FROM files GROUP BY folder_id').all() as { folder_id: string; n: number }[];
   return new Map(rows.map((r) => [r.folder_id, r.n]));
 }
 
-filesApi.get('/folders', (req, res) => {
-  const rows = db.prepare('SELECT * FROM folders ORDER BY system IS NULL, name').all() as unknown as {
+filesApi.get('/folders', async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM folders ORDER BY system IS NULL, name').all() as unknown as {
     id: string; name: string; parent_id: string | null; project_id: string | null; system: string | null; created_at: string;
   }[];
-  const counts = folderCounts();
+  const counts = await folderCounts();
   const user = me(req);
-  const visible = rows.filter((f) => canSeeFolder(user, f.id));
+  const visible = await filterA(rows, async (f) => await canSeeFolder(user, f.id));
   // Pour un invité, le dossier « Messages » n'a pas de sens ; pour tous, on ne montre que ce qui est lisible.
   res.json({
     folders: visible.map((f) => ({
@@ -79,56 +80,56 @@ filesApi.get('/folders', (req, res) => {
   });
 });
 
-filesApi.post('/folders', (req, res) => {
+filesApi.post('/folders', async (req, res) => {
   const { name, parentId } = parse(
     z.object({ name: z.string().trim().min(1, 'Le nom est obligatoire.').max(60).regex(/^[^/\\]+$/, 'Le nom ne peut pas contenir / ou \\.'), parentId: z.string().nullable().optional() }),
     req.body,
   );
   if (!parentId && !isStaff(me(req))) throw new HttpError(403, 'Choisissez un dossier parent.');
-  if (parentId) folderForWrite(req, parentId);
-  const dup = db.prepare('SELECT 1 FROM folders WHERE name = ? AND parent_id IS ?').get(name, parentId ?? null);
+  if (parentId) await folderForWrite(req, parentId);
+  const dup = await db.prepare('SELECT 1 FROM folders WHERE name = ? AND parent_id IS ?').get(name, parentId ?? null);
   if (dup) throw new HttpError(409, 'Un dossier porte déjà ce nom ici.');
   const id = uid();
-  db.prepare('INSERT INTO folders (id,name,parent_id,created_by,created_at) VALUES (?,?,?,?,?)').run(id, name, parentId ?? null, me(req).id, now());
-  const pid = parentId ? folderProjectId(parentId) : null;
-  logActivity(me(req), 'create', 'folder', id, `Dossier « ${name} » créé`, pid);
+  await db.prepare('INSERT INTO folders (id,name,parent_id,created_by,created_at) VALUES (?,?,?,?,?)').run(id, name, parentId ?? null, me(req).id, now());
+  const pid = parentId ? (await folderProjectId(parentId)) : null;
+  await logActivity(me(req), 'create', 'folder', id, `Dossier « ${name} » créé`, pid);
   emitAll({ type: 'file' });
   res.status(201).json({ folder: { id, name, parentId: parentId ?? null, projectId: null, system: null, fileCount: 0 } });
 });
 
-filesApi.patch('/folders/:id', requireStaff, (req, res) => {
-  const f = folderForWrite(req, idParam(req));
+filesApi.patch('/folders/:id', requireStaff, async (req, res) => {
+  const f = await folderForWrite(req, idParam(req));
   if (f.system) throw new HttpError(400, 'Ce dossier système ne peut pas être renommé.');
   const { name } = parse(z.object({ name: z.string().trim().min(1).max(60).regex(/^[^/\\]+$/) }), req.body);
-  db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name, f.id);
+  await db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name, f.id);
   emitAll({ type: 'file' });
   res.json({ ok: true });
 });
 
-filesApi.delete('/folders/:id', requireStaff, (req, res) => {
-  const f = folderForWrite(req, idParam(req));
+filesApi.delete('/folders/:id', requireStaff, async (req, res) => {
+  const f = await folderForWrite(req, idParam(req));
   if (f.system) throw new HttpError(400, 'Ce dossier système ne peut pas être supprimé.');
   if (f.created_by !== me(req).id && me(req).role !== 'admin') throw new HttpError(403, "Seul l'auteur du dossier ou le Super Admin peut le supprimer.");
-  const rows = db
-    .prepare(
-      `WITH RECURSIVE tree(id) AS (SELECT id FROM folders WHERE id = ? UNION ALL SELECT c.id FROM folders c JOIN tree t ON c.parent_id = t.id)
+  const rows = await db
+      .prepare(
+        `WITH RECURSIVE tree(id) AS (SELECT id FROM folders WHERE id = ? UNION ALL SELECT c.id FROM folders c JOIN tree t ON c.parent_id = t.id)
        SELECT f.stored_name, f.user_id FROM files f WHERE f.folder_id IN (SELECT id FROM tree)`,
-    )
-    .all(f.id) as { stored_name: string; user_id: string }[];
+      )
+      .all(f.id) as { stored_name: string; user_id: string }[];
   // Un fondateur ne peut pas détruire, par ce biais, les fichiers des autres.
   if (me(req).role !== 'admin' && rows.some((r) => r.user_id !== me(req).id)) {
     throw new HttpError(403, 'Ce dossier contient des fichiers déposés par d\'autres personnes.');
   }
-  db.prepare('DELETE FROM folders WHERE id = ?').run(f.id);
+  await db.prepare('DELETE FROM folders WHERE id = ?').run(f.id);
   removeStored(rows.map((r) => r.stored_name));
-  logActivity(me(req), 'delete', 'folder', f.id, `Dossier « ${f.name} » supprimé`, folderProjectId(f.parent_id ?? '') ?? null);
+  await logActivity(me(req), 'delete', 'folder', f.id, `Dossier « ${f.name} » supprimé`, (await folderProjectId(f.parent_id ?? '')) ?? null);
   emitAll({ type: 'file' });
   res.json({ ok: true });
 });
 
 /* -------------------------------- Fichiers -------------------------------- */
 
-filesApi.get('/files', (req, res) => {
+filesApi.get('/files', async (req, res) => {
   const { folderId, q, author, from, to, level } = req.query as Record<string, string | undefined>;
   const where: string[] = ['f.channel_id IS NULL'];
   const args: string[] = [];
@@ -139,20 +140,20 @@ filesApi.get('/files', (req, res) => {
   if (to) { where.push('f.created_at <= ?'); args.push(`${to}T23:59:59.999Z`); }
   if (level && (LEVELS as readonly string[]).includes(level)) { where.push('f.level = ?'); args.push(level); }
   // Les pièces jointes de salons restent dans le dossier « Messages » (visibles selon l'accès au salon).
-  const isMessagesFolder = folderId && (db.prepare("SELECT 1 FROM folders WHERE id = ? AND system = 'messages'").get(folderId) ?? false);
+  const isMessagesFolder = folderId && ((await db.prepare("SELECT 1 FROM folders WHERE id = ? AND system = 'messages'").get(folderId)) ?? false);
   const sql = isMessagesFolder
     ? `${FILE_SELECT} WHERE f.folder_id = ? ORDER BY f.created_at DESC LIMIT 500`
     : `${FILE_SELECT} WHERE ${where.join(' AND ')} ORDER BY f.created_at DESC LIMIT 1000`;
-  const rows = db.prepare(sql).all(...(isMessagesFolder ? [folderId as string] : args)) as unknown as FileRow[];
-  const visible = rows.filter((f) => canViewFile(me(req), f)).slice(0, 300);
+  const rows = await db.prepare(sql).all(...(isMessagesFolder ? [folderId as string] : args)) as unknown as FileRow[];
+  const visible = (await filterA(rows, async (f) => await canViewFile(me(req), f))).slice(0, 300);
   res.json({ files: visible.map(shapeFile) });
 });
 
 const SECRET_NAME = /(^\.env|\.pem$|\.key$|\.p12$|\.pfx$|\.kdbx$|id_rsa|id_ed25519|secret|password|mot[-_ ]?de[-_ ]?passe|credential)/i;
-function isInfraFolder(folderId: string): boolean {
+async function isInfraFolder(folderId: string): Promise<boolean> {
   let id: string | null = folderId;
   for (let i = 0; id && i < 50; i++) {
-    const f = db.prepare('SELECT name, parent_id, project_id FROM folders WHERE id = ?').get(id) as { name: string; parent_id: string | null; project_id: string | null } | undefined;
+    const f = await db.prepare('SELECT name, parent_id, project_id FROM folders WHERE id = ?').get(id) as { name: string; parent_id: string | null; project_id: string | null } | undefined;
     if (!f) return false;
     if (!f.parent_id) return f.name === 'Infrastructure' && !f.project_id;
     id = f.parent_id;
@@ -160,7 +161,7 @@ function isInfraFolder(folderId: string): boolean {
   return false;
 }
 
-filesApi.post('/files', receiveFile, (req, res) => {
+filesApi.post('/files', receiveFile, async (req, res) => {
   const file = req.file;
   if (!file) throw new HttpError(400, 'Aucun fichier reçu.');
   const body = req.body ?? {};
@@ -176,47 +177,47 @@ filesApi.post('/files', receiveFile, (req, res) => {
     let linkedTask: string | null = null;
     let projectId: string | null = null;
     if (channelId) {
-      const channel = channelForAccess(me(req), channelId);
-      assertCanPost(me(req), channel);
-      folderId = (db.prepare("SELECT id FROM folders WHERE system = 'messages'").get() as { id: string }).id;
+      const channel = await channelForAccess(me(req), channelId);
+      await assertCanPost(me(req), channel);
+      folderId = (await db.prepare("SELECT id FROM folders WHERE system = 'messages'").get() as { id: string }).id;
       chanId = channel.id;
       projectId = channel.project_id;
     } else if (taskId) {
-      const t = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as { project_id: string } | undefined;
-      if (!t || !canSeeProject(me(req), t.project_id)) throw new HttpError(404, 'Tâche introuvable.');
-      projectForWrite(me(req), t.project_id);
-      folderId = (db.prepare("SELECT id FROM folders WHERE project_id = ? AND system = 'project'").get(t.project_id) as { id: string }).id;
+      const t = await db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as { project_id: string } | undefined;
+      if (!t || !(await canSeeProject(me(req), t.project_id))) throw new HttpError(404, 'Tâche introuvable.');
+      await projectForWrite(me(req), t.project_id);
+      folderId = (await db.prepare("SELECT id FROM folders WHERE project_id = ? AND system = 'project'").get(t.project_id) as { id: string }).id;
       linkedTask = taskId;
       projectId = t.project_id;
     } else {
-      const target = z.string().max(80).optional().catch(undefined).parse(body.folderId) ?? (db.prepare("SELECT id FROM folders WHERE system = 'general'").get() as { id: string }).id;
-      folderId = folderForWrite(req, target).id;
-      projectId = folderProjectId(folderId);
+      const target = z.string().max(80).optional().catch(undefined).parse(body.folderId) ?? (await db.prepare("SELECT id FROM folders WHERE system = 'general'").get() as { id: string }).id;
+      folderId = (await folderForWrite(req, target)).id;
+      projectId = (await folderProjectId(folderId));
     }
-    if (isInfraFolder(folderId) && SECRET_NAME.test(name)) {
+    if ((await isInfraFolder(folderId)) && SECRET_NAME.test(name)) {
       throw new HttpError(422, "L'espace Infrastructure ne stocke aucun secret (clés, mots de passe, fichiers .env) : utilisez un gestionnaire de secrets et décrivez ici la procédure.");
     }
-    db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
-      id, name, file.filename, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
-    );
+    await db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
+            id, name, file.filename, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
+          );
     let message = null;
     if (chanId) {
       const caption = z.string().trim().max(4000).catch('').parse(body.caption);
-      message = postMessage(channelForAccess(me(req), chanId), me(req), caption, id);
+      message = (await postMessage((await channelForAccess(me(req), chanId)), me(req), caption, id));
     }
-    logActivity(me(req), 'upload', 'file', id, `Fichier « ${name} » déposé`, projectId);
-    if (projectId) emitTo(projectAudience(projectId), { type: 'file', fileId: id });
+    await logActivity(me(req), 'upload', 'file', id, `Fichier « ${name} » déposé`, projectId);
+    if (projectId) emitTo((await projectAudience(projectId)), { type: 'file', fileId: id });
     else emitAll({ type: 'file', fileId: id });
-    res.status(201).json({ file: shapeFile(loadFile(id) as FileRow), message });
+    res.status(201).json({ file: shapeFile(await loadFile(id) as FileRow), message });
   } catch (e) {
     fs.rm(path.join(UPLOAD_DIR, file.filename), { force: true }, () => {});
-    db.prepare('DELETE FROM files WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM files WHERE id = ?').run(id);
     throw e;
   }
 });
 
-filesApi.patch('/files/:id', (req, res) => {
-  const f = fileForRead(req, idParam(req));
+filesApi.patch('/files/:id', async (req, res) => {
+  const f = await fileForRead(req, idParam(req));
   if (f.user_id !== me(req).id && me(req).role !== 'admin') throw new HttpError(403, "Seul l'auteur ou le Super Admin peut modifier ce fichier.");
   const input = parse(
     z.object({
@@ -227,32 +228,32 @@ filesApi.patch('/files/:id', (req, res) => {
     req.body,
   );
   let folderId = f.folder_id;
-  if (input.folderId && !f.channel_id) folderId = folderForWrite(req, input.folderId).id;
+  if (input.folderId && !f.channel_id) folderId = (await folderForWrite(req, input.folderId)).id;
   let name = f.name;
   if (input.name) {
     if (!mimeFor(input.name) || mimeFor(input.name) !== f.mime) throw new HttpError(400, "L'extension du fichier ne peut pas être changée.");
     name = input.name;
   }
-  db.prepare('UPDATE files SET level = ?, folder_id = ?, name = ? WHERE id = ?').run(input.level ?? f.level, folderId, name, f.id);
+  await db.prepare('UPDATE files SET level = ?, folder_id = ?, name = ? WHERE id = ?').run(input.level ?? f.level, folderId, name, f.id);
   emitAll({ type: 'file', fileId: f.id });
-  res.json({ file: shapeFile(loadFile(f.id) as FileRow) });
+  res.json({ file: shapeFile(await loadFile(f.id) as FileRow) });
 });
 
-filesApi.get('/files/:id/download', (req, res) => {
-  const f = fileForRead(req, idParam(req));
+filesApi.get('/files/:id/download', async (req, res) => {
+  const f = await fileForRead(req, idParam(req));
   const p = path.join(UPLOAD_DIR, f.stored_name);
   if (!fs.existsSync(p)) throw new HttpError(404, 'Fichier introuvable sur le serveur.');
   if (f.level === 'confidential' || f.level === 'strict') {
-    logActivity(me(req), 'download', 'file', f.id, `Fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} » téléchargé`, folderProjectId(f.folder_id));
-    audit(me(req), 'security', 'file_download', 'file', f.id, `Téléchargement du fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} »`);
+    await logActivity(me(req), 'download', 'file', f.id, `Fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} » téléchargé`, (await folderProjectId(f.folder_id)));
+    await audit(me(req), 'security', 'file_download', 'file', f.id, `Téléchargement du fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} »`);
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.download(p, f.name); // « attachment » : jamais exécuté par le navigateur
 });
 
 // Aperçu : uniquement des images, type MIME imposé par le serveur, dans un bac à sable.
-filesApi.get('/files/:id/preview', (req, res) => {
-  const f = fileForRead(req, idParam(req));
+filesApi.get('/files/:id/preview', async (req, res) => {
+  const f = await fileForRead(req, idParam(req));
   if (!PREVIEWABLE.has(f.mime)) throw new HttpError(415, 'Aperçu indisponible pour ce type de fichier.');
   const p = path.join(UPLOAD_DIR, f.stored_name);
   if (!fs.existsSync(p)) throw new HttpError(404, 'Fichier introuvable sur le serveur.');
@@ -264,17 +265,17 @@ filesApi.get('/files/:id/preview', (req, res) => {
 });
 
 // Matrice v1.1 : chacun supprime ses propres fichiers (y compris ses pièces jointes de tâche) ; le Super Admin supprime tout.
-filesApi.delete('/files/:id', (req, res) => {
-  const f = fileForRead(req, idParam(req));
+filesApi.delete('/files/:id', async (req, res) => {
+  const f = await fileForRead(req, idParam(req));
   const user = me(req);
   if (!(user.role === 'admin' || f.user_id === user.id)) {
     throw new HttpError(403, 'Vous ne pouvez supprimer que vos propres fichiers.');
   }
-  const projectId = folderProjectId(f.folder_id);
-  if (projectId) projectForWrite(user, projectId);
-  tx(() => db.prepare('DELETE FROM files WHERE id = ?').run(f.id));
+  const projectId = await folderProjectId(f.folder_id);
+  if (projectId) await projectForWrite(user, projectId);
+  await tx(async () => await db.prepare('DELETE FROM files WHERE id = ?').run(f.id));
   removeStored([f.stored_name]);
-  logActivity(user, 'delete', 'file', f.id, `Fichier « ${f.name} » supprimé`, projectId);
+  await logActivity(user, 'delete', 'file', f.id, `Fichier « ${f.name} » supprimé`, projectId);
   emitAll({ type: 'file', fileId: f.id });
   res.json({ ok: true });
 });
