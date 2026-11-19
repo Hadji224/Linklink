@@ -47,18 +47,18 @@ Légende : ✅ conforme · 🟡 partiel / écart assumé · ⛔ non fait · 🌐
 | WCAG AA, clavier, ARIA | ✅ | axe-core sans violation sur les écrans principaux ; Lighthouse accessibilité 100. |
 | Feedback (toasts, spinners, erreurs) | ✅ | |
 | HTTPS, TLS 1.3 | 🌐 | Fourni par Caddy/Render. HSTS envoyé en production. |
-| Chiffrement au repos (AES-256) | 🌐 | Non fait par l'application : utiliser un disque chiffré chez l'hébergeur. |
+| Chiffrement au repos (AES-256) | 🌐 | Assuré par les hébergeurs (Neon pour la base, Google Drive pour les fichiers) ; non fait par l'application. |
 | bcrypt, CSRF, XSS, injection SQL | ✅ | Voir `docs/securite.md` (bcrypt coût 10, jeton en en-tête : pas de CSRF). |
-| Logs d'accès 12 mois | ✅ | `DATA_DIR/logs`, purge automatique. |
-| Sauvegarde BDD quotidienne, rétention 30 j | ✅ | Automatique. |
+| Logs d'accès 12 mois | 🟡 | `DATA_DIR/logs`, purge automatique ; **perdus au redémarrage sur Render gratuit** (disque éphémère) : disque persistant requis pour tenir les 12 mois. |
+| Sauvegarde BDD quotidienne, rétention 30 j | ✅ | Neon : historique et restauration à un instant donné ; copie à la demande `npm run backup`. |
 | Fichiers : réplication géographique | 🌐 | À mettre en place côté hébergement (rsync/S3). |
-| Test de restauration mensuel | 🟡 | Script fourni (`npm run backup:verify`) ; à planifier par l'équipe. |
+| Test de restauration mensuel | 🟡 | Procédure dans `docs/deploiement.md` (restauration dans une branche Neon ou une base de test) ; à planifier par l'équipe. |
 | RGPD : registre, accès, oubli | ✅ | `docs/rgpd-registre.md`, export et suppression dans le profil. |
 | Hébergement UE | 🌐 | Choix de l'hébergeur. |
 | CGU + confidentialité | ✅ | Pages `#legal/cgu` et `#legal/confidentialite` (textes à faire valider juridiquement). |
 
 ## §7–8 Architecture et données
-- Stack conforme (React 19, Vite, Tailwind v4, Express, node:sqlite, ws, JWT + bcryptjs, Multer, Zod). ✅
+- Stack conforme (React 19, Vite, Tailwind v4, Express, PostgreSQL (pg), ws, JWT + bcryptjs, Multer, Zod). ✅
 - Structure du projet : conforme, avec en plus `routes/projects.ts`, `tasks.ts`, `misc.ts` ; les routes « membres » sont dans `routes/auth.ts` (pas de `routes/members.ts` séparé). 🟡 cosmétique
 - Modèle de données : **étendu** par rapport au §8.1 (rôle `guest`, projets, tâches, dossiers, notifications, journal…). Écarts volontaires : `files.folder` (texte) est devenu `folder_id` (arborescence) ; `files.uploaded_by` s'appelle `user_id` ; le code d'invitation est dans `settings` (deux codes) plutôt que dans une table `invites`. 🟡
 - Index prévus (§8.3) : tous présents. ✅
@@ -90,7 +90,7 @@ README ✅ · guide utilisateur PDF ✅ · rapport de tests ✅ · guide de dép
 Variables d'environnement, Caddy/Nginx, disque persistant, CGU en ligne, test de restauration, rollback : documentés ✅ (Dockerfile non testé : pas de démon Docker disponible ici). Monitoring (UptimeRobot/Sentry) : route `/api/health` fournie, outils à brancher 🌐. Branches `dev` et `main` créées ✅. Environnements staging/prod (`staging.linklink.gn`, `app.linklink.gn`) : à créer 🌐.
 
 ## Objectifs secondaires §2.3
-- Identité produit forte ✅ · base scalable pour 50+ utilisateurs ✅ (SQLite : voir limites dans `docs/deploiement.md`)
+- Identité produit forte ✅ · base scalable pour 50+ utilisateurs ✅ (PostgreSQL ; une seule instance du serveur : voir « Écritures simultanées » dans `docs/deploiement.md`)
 - **Documenter les process internes (SOP) dans la plateforme** : ⛔ pas de module dédié (contournement : dossier de projet « Procédures » dans Documents).
 - Préparer l'ouverture externe : ⛔ Phase 2.
 

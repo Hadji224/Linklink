@@ -19,7 +19,7 @@ Application interne de LinkLink : **messages, projets, tâches, rendez-vous et d
 | **Tableau de bord** | Mes tâches du jour, mes prochains RDV, messages non lus, 4 indicateurs. |
 | **Notifications** | Dans l'application (temps réel) et par e-mail (si SMTP configuré) : assignation, mention, échéance J-1 / J-0, tâche en retard, nouveau RDV, rappels de RDV (24 h et 1 h). |
 | **Traçabilité et RGPD** | Journaux immuables (métier, sécurité, urgence), journal d'accès conservé 12 mois, export des données personnelles, suppression de compte en cascade, consentement, pages CGU et confidentialité. |
-| **Exploitation** | Sauvegarde quotidienne de la base (30 jours), script de test de restauration, route de santé `/api/health`, en-têtes de sécurité. |
+| **Exploitation** | Base PostgreSQL (Neon) avec restauration à un instant donné, copie `npm run backup`, fichiers dans Google Drive, route de santé `/api/health`, en-têtes de sécurité. |
 
 La **Phase 2** du cahier des charges (portail client, partage externe, facturation) n'est pas incluse.
 
@@ -46,13 +46,13 @@ npm run test:e2e    # tests navigateur (Playwright) — voir docs/rapport-de-tes
 
 ## Configuration
 
-Voir `.env.example`. Variables principales : `PORT`, `DATA_DIR` (base, fichiers, sauvegardes, logs), `TRUST_PROXY`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `APP_URL`, `SMTP_URL`, `MAIL_FROM`.
+Voir `.env.example`. Variables principales : `DATABASE_URL` (PostgreSQL, obligatoire), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` (fichiers dans Google Drive), `PORT`, `DATA_DIR` (copies temporaires et journaux d'accès), `TRUST_PROXY`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `APP_URL`, `CORS_ORIGIN`, `SMTP_URL`, `MAIL_FROM`.
 
-Toutes les données sont dans `DATA_DIR` : **mettez ce dossier sur un disque persistant**.
+Les données sont dans PostgreSQL et les fichiers dans Google Drive ([guide](docs/stockage-google-drive.md)) : le serveur lui-même ne garde rien d'essentiel. Sans Google Drive, les fichiers vont dans `DATA_DIR/uploads` (à placer sur un disque persistant).
 
 ## Mise en ligne
 
-Dockerfile, `render.yaml` (Render) et `Caddyfile` (VPS + HTTPS automatique) sont fournis. Pas à pas dans [`docs/deploiement.md`](docs/deploiement.md).
+Vercel (interface) + Render (API) + Neon (PostgreSQL) + Google Drive (fichiers) ; Dockerfile, `render.yaml`, `vercel.json` et `Caddyfile` (VPS) sont fournis. Pas à pas dans [`docs/deploiement.md`](docs/deploiement.md).
 
 ## Documentation
 
@@ -67,13 +67,15 @@ Dockerfile, `render.yaml` (Render) et `Caddyfile` (VPS + HTTPS automatique) sont
 ## Architecture
 
 ```
-server/   API Express + WebSocket + SQLite (node:sqlite), TypeScript
+server/   API Express + WebSocket + PostgreSQL (pg), TypeScript
   src/routes/   auth, gouvernance, projets, tâches, dépenses, communications, salons, fichiers, rendez-vous, divers
   src/access.ts fonctions, mandats, cumuls, capacités (can), journaux immuables
   src/perm.ts   règles d'accès (projets, salons, fichiers, confidentialité)
-  src/jobs.ts   rappels automatiques et sauvegardes
+  src/db.ts     accès PostgreSQL asynchrone, migrations versionnées, transactions
+  src/storage.ts fichiers : Google Drive (OAuth) ou disque local
+  src/jobs.ts   rappels automatiques
 web/      Interface React 19 + Tailwind v4 (Vite), charte graphique LinkLink v1.0
 e2e/      Tests navigateur (Playwright + axe)
 ```
 
-Les bases v1 à v3 sont migrées automatiquement (jusqu'au schéma v4) au premier lancement ; une copie est conservée dans `DATA_DIR/backups`.
+Le schéma est créé et migré automatiquement au démarrage (`schema_migrations`). Une ancienne base SQLite s'importe avec `npm run import:sqlite` (voir [`docs/deploiement.md`](docs/deploiement.md)).

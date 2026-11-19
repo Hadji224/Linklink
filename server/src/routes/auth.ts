@@ -9,6 +9,7 @@ import { HttpError, idParam, me, parse } from '../http.js';
 import { disconnectUser, emitAll, onlineUserIds } from '../realtime.js';
 import { handOverTasksOf } from '../taskrules.js';
 import { removeStored } from '../uploads.js';
+import { storageName } from '../storage.js';
 import { mapA } from "../async.js";
 
 export const publicApi = Router();
@@ -73,7 +74,7 @@ publicApi.get('/setup', async (_req, res) => {
 
 publicApi.get('/health', async (_req, res) => {
   await db.prepare('SELECT 1').get();
-  res.json({ ok: true, time: now() });
+  res.json({ ok: true, time: now(), storage: storageName() });
 });
 
 /* ------------------------------ Compte connecté ------------------------------ */

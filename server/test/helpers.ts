@@ -50,7 +50,7 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function startServer(opts: { dataDir?: string; databaseUrl?: string } = {}): Promise<Srv> {
+export async function startServer(opts: { dataDir?: string; databaseUrl?: string; env?: Record<string, string> } = {}): Promise<Srv> {
   const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'linklink-test-'));
   const created = opts.databaseUrl ? null : await createTestDatabase();
   const databaseUrl = opts.databaseUrl ?? (created as { url: string }).url;
@@ -61,7 +61,7 @@ export async function startServer(opts: { dataDir?: string; databaseUrl?: string
     new Promise<void>((resolve, reject) => {
       child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
         cwd: path.resolve(import.meta.dirname, '..'),
-        env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, DATABASE_URL: databaseUrl, AUTH_RATE_LIMIT: '10000', NODE_ENV: 'test' },
+        env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, DATABASE_URL: databaseUrl, ...opts.env, AUTH_RATE_LIMIT: '10000', NODE_ENV: 'test' },
       });
       let out = '';
       child.stdout?.on('data', (d) => {

@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { requireStaff } from '../auth.js';
 import { logActivity } from '../activity.js';
-import { db, now, tx, uid, UPLOAD_DIR, type Level } from '../db.js';
+import { db, now, tx, uid, type Level } from '../db.js';
+import { storage } from '../storage.js';
 import { HttpError, idParam, me, parse } from '../http.js';
 import { audit } from '../access.js';
 import { canSeeFolder, canViewFile, channelForAccess, folderProjectId, assertCanPost, projectForWrite, projectAudience, canSeeProject, isStaff } from '../perm.js';
@@ -171,6 +173,7 @@ filesApi.post('/files', receiveFile, async (req, res) => {
   const channelId = z.string().max(80).optional().catch(undefined).parse(body.channelId);
   const taskId = z.string().max(80).optional().catch(undefined).parse(body.taskId);
   const id = uid();
+  let key: string | null = null;
   try {
     let folderId: string;
     let chanId: string | null = null;
@@ -197,8 +200,10 @@ filesApi.post('/files', receiveFile, async (req, res) => {
     if ((await isInfraFolder(folderId)) && SECRET_NAME.test(name)) {
       throw new HttpError(422, "L'espace Infrastructure ne stocke aucun secret (clés, mots de passe, fichiers .env) : utilisez un gestionnaire de secrets et décrivez ici la procédure.");
     }
+    // Toutes les vérifications sont passées : on range le fichier (disque ou Google Drive), puis on l'enregistre.
+    key = await storage.put(file.path, { name, mime });
     await db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
-            id, name, file.filename, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
+            id, name, key, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
           );
     let message = null;
     if (chanId) {
@@ -210,9 +215,11 @@ filesApi.post('/files', receiveFile, async (req, res) => {
     else emitAll({ type: 'file', fileId: id });
     res.status(201).json({ file: shapeFile(await loadFile(id) as FileRow), message });
   } catch (e) {
-    fs.rm(path.join(UPLOAD_DIR, file.filename), { force: true }, () => {});
+    if (key) await storage.remove([key]).catch(() => {});
     await db.prepare('DELETE FROM files WHERE id = ?').run(id);
     throw e;
+  } finally {
+    await fs.promises.rm(file.path, { force: true }); // copie temporaire (attendu : réponse envoyée après le nettoyage)
   }
 });
 
@@ -241,28 +248,42 @@ filesApi.patch('/files/:id', async (req, res) => {
 
 filesApi.get('/files/:id/download', async (req, res) => {
   const f = await fileForRead(req, idParam(req));
-  const p = path.join(UPLOAD_DIR, f.stored_name);
-  if (!fs.existsSync(p)) throw new HttpError(404, 'Fichier introuvable sur le serveur.');
+  const obj = await storage.open(f.stored_name);
   if (f.level === 'confidential' || f.level === 'strict') {
     await logActivity(me(req), 'download', 'file', f.id, `Fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} » téléchargé`, (await folderProjectId(f.folder_id)));
     await audit(me(req), 'security', 'file_download', 'file', f.id, `Téléchargement du fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} »`);
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.download(p, f.name); // « attachment » : jamais exécuté par le navigateur
+  res.attachment(f.name); // « attachment » : jamais exécuté par le navigateur
+  if (obj.size) res.setHeader('Content-Length', String(obj.size));
+  await sendStream(obj.stream, res);
 });
 
 // Aperçu : uniquement des images, type MIME imposé par le serveur, dans un bac à sable.
 filesApi.get('/files/:id/preview', async (req, res) => {
   const f = await fileForRead(req, idParam(req));
   if (!PREVIEWABLE.has(f.mime)) throw new HttpError(415, 'Aperçu indisponible pour ce type de fichier.');
-  const p = path.join(UPLOAD_DIR, f.stored_name);
-  if (!fs.existsSync(p)) throw new HttpError(404, 'Fichier introuvable sur le serveur.');
+  const obj = await storage.open(f.stored_name);
   res.setHeader('Content-Type', f.mime);
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'private, max-age=300');
-  fs.createReadStream(p).pipe(res);
+  if (obj.size) res.setHeader('Content-Length', String(obj.size));
+  await sendStream(obj.stream, res);
 });
+
+/** Envoie le flux ; un client qui coupe la connexion n'est pas une erreur. */
+async function sendStream(stream: import('node:stream').Readable, res: import('express').Response) {
+  try {
+    await pipeline(stream, res);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      console.error('Envoi du fichier interrompu :', e instanceof Error ? e.message : e);
+      if (!res.headersSent) throw new HttpError(502, "Le fichier n'a pas pu être lu.");
+      res.destroy();
+    }
+  }
+}
 
 // Matrice v1.1 : chacun supprime ses propres fichiers (y compris ses pièces jointes de tâche) ; le Super Admin supprime tout.
 filesApi.delete('/files/:id', async (req, res) => {

@@ -9,7 +9,8 @@ Responsable : LinkLink. Délégué : l'administrateur technique de la plateforme
 | Notifications | Informer des échéances, mentions, rendez-vous | E-mail, événements | Idem | Intérêt légitime ; désactivable (e-mails) | Hébergeur SMTP (si activé) | 60 dernières conservées en liste |
 | Journal d'activité | Traçabilité (qui a fait quoi) | Nom, action, date | Idem | Intérêt légitime (sécurité) | Administrateur technique, PDG | Anonymisé à la suppression du compte |
 | Journaux d'accès | Sécurité, diagnostic | IP, identifiant, route, statut | Idem | Intérêt légitime (obligation de conservation) | Administrateur technique, PDG | 12 mois |
-| Sauvegardes | Continuité | Copie de la base | Idem | Intérêt légitime | Administrateurs techniques | 30 jours |
+| Sauvegardes | Continuité | Copie de la base (PostgreSQL / Neon) | Idem | Intérêt légitime | Administrateurs techniques ; sous-traitant : Neon | Historique Neon (selon l'offre) + copies à la demande |
+| Fichiers déposés | Partage de documents | Contenu des fichiers | Équipe | Intérêt légitime | Selon niveau de confidentialité ; sous-traitant : Google (Drive) | Jusqu'à suppression (définitive dans Drive) |
 
 ## Droits des personnes
 - **Accès / portabilité** : « Mon profil → Exporter mes données » (JSON).

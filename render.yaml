@@ -1,9 +1,11 @@
 # Déploiement Render : https://render.com → New → Blueprint → choisir ce dépôt.
+# La base est hébergée à part (Neon, PostgreSQL) et les fichiers dans Google Drive : plus besoin de disque.
+# Le plan gratuit convient (le service se met en veille après 15 min d'inactivité ; premier chargement ~1 min).
 services:
   - type: web
     name: linklink-api
     runtime: docker
-    plan: starter            # un disque persistant exige une offre payante
+    plan: free
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -12,14 +14,18 @@ services:
       - key: TRUST_PROXY
         value: "true"
       - key: DATA_DIR
-        value: /data
+        value: /tmp/linklink
       - key: JWT_SECRET
         generateValue: true
+      - key: DATABASE_URL      # adresse PostgreSQL (Neon)
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
       - key: APP_URL
         sync: false
-      - key: CORS_ORIGIN       # adresse de l'interface si elle est hébergée à part (ex. https://linklink.vercel.app)
+      - key: CORS_ORIGIN       # adresse(s) de l'interface hébergée à part, séparées par des virgules
         sync: false
-    disk:
-      name: linklink-data
-      mountPath: /data
-      sizeGB: 5

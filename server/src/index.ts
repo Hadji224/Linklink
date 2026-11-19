@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { getSetting } from './db.js';
+import { checkStorage } from './storage.js';
 import { startJobs } from './jobs.js';
 import { attachRealtime } from './realtime.js';
 import { api, errorHandler } from './routes/index.js';
@@ -75,5 +76,6 @@ server.listen(PORT, async () => {
   console.log(`Code d'invitation (Fondateurs) : ${(await getSetting('invite_code'))}`);
   console.log(`Code d'invitation (Invités internes) : ${(await getSetting('guest_invite_code'))}`);
   console.log("(Le tout premier compte créé devient Administrateur technique, PDG de démarrage.)");
+  console.log(`Stockage des fichiers : ${await checkStorage()}`);
   startJobs();
 });

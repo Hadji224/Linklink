@@ -14,7 +14,7 @@ export default defineConfig({
     launchOptions: { executablePath: process.env.CHROMIUM_PATH || undefined },
   },
   webServer: {
-    command: 'rm -rf .e2e-data && npm run build && DATA_DIR=$PWD/.e2e-data PORT=3300 AUTH_RATE_LIMIT=10000 npm start',
+    command: 'rm -rf .e2e-data && node e2e/prepare-db.mjs && npm run build && DATABASE_URL=${E2E_DATABASE_URL:-postgresql://postgres@127.0.0.1:5432/linklink_e2e} DATA_DIR=$PWD/.e2e-data PORT=3300 AUTH_RATE_LIMIT=10000 npm start',
     url: 'http://localhost:3300/api/health',
     reuseExistingServer: false,
     timeout: 120_000,

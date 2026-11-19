@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import type { NextFunction, Request, Response } from 'express';
-import { UPLOAD_DIR, uid } from './db.js';
+import { uid } from './db.js';
 import { HttpError } from './http.js';
+import { removeStored, TMP_DIR } from './storage.js';
+
+export { removeStored };
 
 export const MAX_UPLOAD = (Number(process.env.MAX_UPLOAD_MB) || 25) * 1024 * 1024;
 
@@ -45,7 +48,7 @@ export function mimeFor(filename: string): string | null {
 }
 
 export const upload = multer({
-  storage: multer.diskStorage({ destination: UPLOAD_DIR, filename: (_req, _f, cb) => cb(null, uid()) }),
+  storage: multer.diskStorage({ destination: TMP_DIR, filename: (_req, _f, cb) => cb(null, uid()) }),
   limits: { fileSize: MAX_UPLOAD, files: 1 },
 });
 
@@ -70,7 +73,3 @@ export function receiveFile(req: Request, res: Response, next: NextFunction) {
     next();
   });
 }
-
-export const removeStored = (storedNames: string[]) => {
-  for (const n of storedNames) fs.rm(path.join(UPLOAD_DIR, n), { force: true }, () => {});
-};
