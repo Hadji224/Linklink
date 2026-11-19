@@ -30,6 +30,10 @@ if (!DATABASE_URL) {
   console.error(
     "DATABASE_URL manquante : indiquez l'adresse PostgreSQL (ex. postgresql://utilisateur:motdepasse@hote/base?sslmode=require).",
   );
+  // Aide au diagnostic : uniquement les NOMS des variables qui y ressemblent (jamais leurs valeurs).
+  const near = Object.keys(process.env).filter((k) => /(DATA|POSTGRES|PG|NEON|DB|SQL)/i.test(k));
+  console.error(near.length ? `Variables au nom voisin trouvées : ${near.join(', ')} (le nom attendu est exactement DATABASE_URL).` : 'Aucune variable au nom voisin trouvée.');
+  if (process.env.DATABASE_URL === '') console.error('DATABASE_URL existe mais sa valeur est vide.');
   process.exit(1);
 }
 
