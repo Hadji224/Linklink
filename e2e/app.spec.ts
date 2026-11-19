@@ -460,6 +460,21 @@ test('accessibilité WCAG AA (axe) sur les écrans principaux', async () => {
   expect(all, 'violations WCAG AA').toEqual([]);
 });
 
+test('ordinateur portable : le menu latéral reste entièrement accessible quand la fenêtre est peu haute', async () => {
+  await go(admin, 'accueil');
+  for (const [w, h] of [[1366, 600], [1280, 500], [1024, 600]] as const) {
+    await admin.setViewportSize({ width: w, height: h });
+    const aside = admin.locator('aside.side');
+    // Profil (donc déconnexion), Journaux et état de connexion : visibles, ou atteignables en faisant défiler le menu.
+    for (const target of [aside.locator('a[href$="#journal"]'), aside.locator('a[href$="#profil"]'), aside.getByRole('status')]) {
+      await target.scrollIntoViewIfNeeded();
+      await expect(target, `visible à ${w}x${h}`).toBeInViewport();
+    }
+    await aside.evaluate((e) => { e.scrollTop = 0; });
+  }
+  await admin.setViewportSize(desktop.viewport);
+});
+
 test('déconnexion et session conservée au rechargement', async () => {
   await go(admin, 'accueil');
   await admin.reload();

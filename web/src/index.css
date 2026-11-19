@@ -410,3 +410,19 @@ aside :focus-visible {
 @keyframes draw-check { to { stroke-dashoffset: 0; } }
 @keyframes shimmer { to { transform: translateX(100%); } }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* --------------------- Ordinateur portable : fenêtre peu haute ---------------------
+   Le menu de gauche doit toujours rester entièrement accessible (profil, déconnexion, journaux) :
+   il défile si besoin, et se compacte quand la fenêtre fait moins de 800 px de haut. */
+@media (min-width: 768px) and (max-height: 800px) {
+  .side { padding: 0.5rem; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 0.3) transparent; }
+  .side-logo { margin-bottom: 0.5rem; padding: 0.375rem; }
+  .side-logo img { height: 2.75rem; }
+  .side nav a { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+  .side nav + nav { padding-top: 0.5rem; }
+}
+@media (min-width: 768px) and (max-height: 620px) {
+  .side-logo img { height: 2rem; }
+  .side nav a { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .side nav { row-gap: 0; }
+}

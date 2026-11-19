@@ -74,8 +74,8 @@ function Shell() {
       </a>
 
       {/* Navigation latérale (ordinateur) : fond bleu nuit, logo sur tuile blanche (charte §3.3) */}
-      <aside className="hidden w-60 shrink-0 flex-col bg-navy p-3 text-white md:flex">
-        <a href="#accueil" className="mb-4 flex items-center justify-center rounded-2xl bg-white p-3" aria-label="LinkLink — Accueil">
+      <aside className="side hidden min-h-0 w-60 shrink-0 flex-col overflow-y-auto bg-navy p-3 text-white md:flex">
+        <a href="#accueil" className="side-logo mb-4 flex shrink-0 items-center justify-center rounded-2xl bg-white p-3" aria-label="LinkLink — Accueil">
           <Logo symbol className="h-14" />
         </a>
         <nav className="space-y-1" aria-label="Navigation principale">
