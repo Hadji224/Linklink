@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
+import { prepareLogo, useBrand } from '../brand';
 import { useAuth } from '../auth';
 import { useApp } from '../data';
 import { formatDateTime, formatShortDate } from '../format';
@@ -7,10 +8,10 @@ import { go } from '../route';
 import { useCan } from '../perm';
 import { useRealtime } from '../realtime';
 import { FN_KEYS, FN_LABEL, type Fn } from '../types';
-import { Empty, ErrorNote, PageHeader, Spinner, Tabs, useConfirm, useToast } from '../ui';
+import { Empty, ErrorNote, Logo, PageHeader, Spinner, Tabs, useConfirm, useToast } from '../ui';
 import { FormModal } from './FormModal';
 
-type TabId = 'validations' | 'fonctions' | 'mandats' | 'regles' | 'securite';
+type TabId = 'validations' | 'fonctions' | 'mandats' | 'regles' | 'securite' | 'identite';
 
 interface Pending { type: string; id: string; title: string; detail: string; since: string; link: string; blocked: boolean; blockedReason: string; overdue: boolean; canDecide: boolean }
 interface FnRow { fn: Fn; label: string; unique: boolean; holders: { id: string; name: string; available: boolean }[] }
@@ -31,7 +32,7 @@ const MANDATE_TYPE_ROUTE: Record<string, string> = { expense: '#finances', archi
 export function Governance({ tab }: { tab?: string }) {
   const { epoch } = useRealtime();
   const { can } = useCan();
-  const current: TabId = (['validations', 'fonctions', 'mandats', 'regles', 'securite'].includes(tab ?? '') ? tab : 'validations') as TabId;
+  const current: TabId = (['validations', 'fonctions', 'mandats', 'regles', 'securite', ...(can('branding.edit') ? ['identite'] : [])].includes(tab ?? '') ? tab : 'validations') as TabId;
   const [pending, setPending] = useState<Pending[]>([]);
   useEffect(() => { api<{ pending: Pending[] }>('/validations').then((r) => setPending(r.pending)).catch(() => {}); }, [epoch, current]);
   return (
@@ -47,6 +48,7 @@ export function Governance({ tab }: { tab?: string }) {
           { id: 'mandats', label: 'Mandats et absences' },
           { id: 'regles', label: 'Relances' },
           { id: 'securite', label: can('function.assign') || can('journal.security') ? 'Sécurité et urgence' : 'Urgence' },
+          ...(can('branding.edit') ? [{ id: 'identite' as TabId, label: 'Identité' }] : []),
         ]}
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_56rem)/2))]">
@@ -55,6 +57,7 @@ export function Governance({ tab }: { tab?: string }) {
         {current === 'mandats' && <MandatesTab />}
         {current === 'regles' && <RulesTab />}
         {current === 'securite' && <SecurityTab />}
+        {current === 'identite' && <IdentityTab />}
       </div>
     </div>
   );
@@ -321,6 +324,70 @@ function RulesTab() {
           onSubmit={async (v) => { await api(`/validation-rules/${edit.type}`, { method: 'PUT', body: { firstReminderH: Number(v.a), intervalH: Number(v.b), escalationH: Number(v.c) } }); toast.success('Délais enregistrés'); await load(); }}
         />
       )}
+    </div>
+  );
+}
+
+/* ----------------------------------------------- Identité (logo) ----------------------------------------------- */
+
+function IdentityTab() {
+  const { logoUrl, refresh } = useBrand();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function pick(file: File | undefined) {
+    if (!file) return;
+    setError('');
+    setBusy(true);
+    try {
+      const ready = await prepareLogo(file);
+      const form = new FormData();
+      form.append('file', ready, ready.name);
+      await api('/branding/logo', { method: 'PUT', form });
+      await refresh();
+      toast.success('Logo mis à jour');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import impossible.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reset() {
+    if (!(await confirm({ title: 'Rétablir le logo LinkLink ?', message: 'Le logo importé sera retiré pour toute l’équipe.', confirmLabel: 'Rétablir' }))) return;
+    setBusy(true);
+    try {
+      await api('/branding/logo', { method: 'DELETE' });
+      await refresh();
+      toast.success('Logo d’origine rétabli');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action impossible.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-slate">Le logo s’affiche dans le menu de gauche (ordinateur) et sur l’écran de connexion, pour toute l’équipe. Formats : PNG, JPEG ou WebP, 1 Mo maximum. Un fond transparent (PNG) donne le meilleur rendu ; l’image est automatiquement réduite et centrée.</p>
+      <ErrorNote>{error}</ErrorNote>
+      <div className="card flex flex-wrap items-center gap-5 p-4">
+        <div className="flex h-28 w-52 items-center justify-center overflow-hidden rounded-2xl bg-navy p-3" aria-label="Aperçu du logo dans le menu">
+          <div className="flex h-full w-full items-center justify-center rounded-xl bg-white p-2"><Logo symbol className="h-full" /></div>
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="font-semibold">{logoUrl ? 'Logo personnalisé' : 'Logo LinkLink d’origine'}</p>
+          <div className="flex flex-wrap gap-2">
+            <label className={`btn btn-primary btn-sm cursor-pointer ${busy ? 'pointer-events-none opacity-60' : ''}`}>
+              {logoUrl ? 'Remplacer le logo' : 'Importer un logo'}
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Choisir un fichier de logo" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+            {logoUrl && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void reset()}>Rétablir le logo LinkLink</button>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -180,7 +180,7 @@ export type Capability =
   | 'finance.read' | 'expense.create' | 'expense.pay'
   | 'announce.internal' | 'announce.service' | 'crisis.publish' | 'comm.publish' | 'comm.prepare' | 'comm.withdraw'
   | 'journal.business' | 'journal.security' | 'journal.emergency' | 'infra.read'
-  | 'tech.ops' | 'account.suspend';
+  | 'tech.ops' | 'account.suspend' | 'branding.edit';
 
 const NEED: Record<string, string> = {
   'project.create': 'le PDG ou le Coordinateur',
@@ -205,6 +205,7 @@ const NEED: Record<string, string> = {
   'infra.read': 'un fondateur',
   'tech.ops': "l'administrateur technique ou le Chef d'infrastructures mandaté",
   'account.suspend': "l'administrateur technique",
+  'branding.edit': "le PDG, le Chargé de communication ou l'administrateur technique",
 };
 
 export async function can(u: UserLite, cap: Capability): Promise<boolean> {
@@ -233,6 +234,7 @@ export async function can(u: UserLite, cap: Capability): Promise<boolean> {
     case 'infra.read': return true;
     case 'tech.ops': return u.role === 'admin' || (f.has('infra_lead') && (await activeMandates(u.id, 'technical_ops')).length > 0);
     case 'account.suspend': return u.role === 'admin';
+    case 'branding.edit': return u.role === 'admin' || f.has('pdg') || f.has('comms');
   }
 }
 

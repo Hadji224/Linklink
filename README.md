@@ -14,7 +14,7 @@ Application interne de LinkLink : **messages, projets, tâches, rendez-vous et d
 | **Rendez-vous** | Création (équipe ou projet), réponse Présent / Peut-être / Absent, export `.ics`, tri « à venir / passés ». |
 | **Finances** | Demandes de dépense, double approbation si le PDG est concerné, plafond, paiement déclaré par le Caissier, écart à régulariser, justificatifs cosignés, clôture. |
 | **Communications** | Cinq circuits de validation (courante, projet, officielle, technique, publicité payante), validateurs indépendants, voie de crise avec revue sous 24 h, publication par le Chargé de communication. |
-| **Gouvernance** | Validations en attente et relances (24/48/120 h), fonctions, mandats et absences, règles de relance, accès d'urgence, transfert d'administration, suspension de compte. |
+| **Gouvernance** | Validations en attente et relances (24/48/120 h), fonctions, mandats et absences, règles de relance, accès d'urgence, transfert d'administration, suspension de compte, identité visuelle (logo de la plateforme importable par le PDG, le Chargé de communication ou l'admin technique : PNG, JPEG ou WebP, 1 Mo). |
 | **Journaux** | Activité, décisions métier, sécurité et urgence : immuables (protégés en base). |
 | **Tableau de bord** | Mes tâches du jour, mes prochains RDV, messages non lus, 4 indicateurs. |
 | **Notifications** | Dans l'application (temps réel) et par e-mail (si SMTP configuré) : assignation, mention, échéance J-1 / J-0, tâche en retard, nouveau RDV, rappels de RDV (24 h et 1 h). |
@@ -68,7 +68,7 @@ Vercel (interface) + Render (API) + Neon (PostgreSQL) + Google Drive (fichiers) 
 
 ```
 server/   API Express + WebSocket + PostgreSQL (pg), TypeScript
-  src/routes/   auth, gouvernance, projets, tâches, dépenses, communications, salons, fichiers, rendez-vous, divers
+  src/routes/   auth, gouvernance, projets, tâches, dépenses, communications, salons, fichiers, logo (branding), rendez-vous, divers
   src/access.ts fonctions, mandats, cumuls, capacités (can), journaux immuables
   src/perm.ts   règles d'accès (projets, salons, fichiers, confidentialité)
   src/db.ts     accès PostgreSQL asynchrone, migrations versionnées, transactions

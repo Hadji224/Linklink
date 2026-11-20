@@ -4,6 +4,7 @@ import { accessLogger } from '../logger.js';
 import { HttpError } from '../http.js';
 import { serializeWrites } from '../writelock.js';
 import { accountApi, publicApi } from './auth.js';
+import { brandingApi, brandingPublicApi } from './branding.js';
 import { channelsApi } from './channels.js';
 import { communicationsApi } from './communications.js';
 import { expensesApi } from './expenses.js';
@@ -18,9 +19,10 @@ export const api = Router();
 
 api.use(serializeWrites);
 api.use(publicApi);
+api.use(brandingPublicApi);
 api.use(requireAuth);
 api.use(accessLogger);
-for (const r of [accountApi, governanceApi, projectsApi, tasksApi, expensesApi, communicationsApi, channelsApi, filesApi, meetingsApi, miscApi]) api.use(r);
+for (const r of [accountApi, brandingApi, governanceApi, projectsApi, tasksApi, expensesApi, communicationsApi, channelsApi, filesApi, meetingsApi, miscApi]) api.use(r);
 
 api.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable.' });

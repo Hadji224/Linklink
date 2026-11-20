@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
+import zlib from 'node:zlib';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -515,6 +516,76 @@ test('grand écran : la molette défile même au-dessus des marges vides et le d
   await admin.mouse.wheel(0, 4000);
   await expect(dernier).toBeInViewport();
   await admin.setViewportSize(desktop.viewport);
+});
+
+/** PNG plein de couleur (sans dépendance) pour tester l'import d'un logo de forme quelconque. */
+function makePng(w: number, h: number, [r, g, b]: [number, number, number]) {
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => [r, g, b]).flat())]);
+  const raw = Buffer.concat(Array.from({ length: h }, () => row));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('boutons visibles (fond coloré) et logo centré ; import, affichage partout et retrait d’un logo personnalisé', async () => {
+  await admin.setViewportSize(desktop.viewport);
+  await go(admin, 'gouvernance');
+  await admin.getByRole('tab', { name: 'Fonctions' }).click();
+  // Bouton secondaire : jamais blanc sur blanc.
+  const attribuer = admin.getByRole('button', { name: 'Attribuer' }).first();
+  await expect(attribuer).toBeVisible();
+  expect(await attribuer.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgb(255, 255, 255)');
+
+  // Logo d'origine : centré dans sa tuile.
+  const centered = async () => admin.evaluate(() => {
+    const tile = document.querySelector('.side-logo') as HTMLElement;
+    const img = tile.querySelector('img') as HTMLElement;
+    const t = tile.getBoundingClientRect(), i = img.getBoundingClientRect();
+    return { dx: Math.abs((t.left + t.right) / 2 - (i.left + i.right) / 2), dy: Math.abs((t.top + t.bottom) / 2 - (i.top + i.bottom) / 2), fits: i.width <= t.width && i.height <= t.height, src: (img as HTMLImageElement).src };
+  });
+  let c = await centered();
+  expect(c.dx).toBeLessThan(1.5); expect(c.dy).toBeLessThan(1.5); expect(c.fits).toBe(true);
+
+  // Import d'un logo très large (400 × 100) : il reste entier et centré.
+  await admin.getByRole('tab', { name: 'Identité' }).click();
+  await expect(admin.getByText('Logo LinkLink d’origine')).toBeVisible();
+  await admin.getByLabel('Choisir un fichier de logo').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: makePng(400, 100, [200, 30, 90]) });
+  await expect(admin.getByText('Logo personnalisé')).toBeVisible();
+  await expect.poll(async () => (await centered()).src).toMatch(/^blob:/);
+  c = await centered();
+  expect(c.dx).toBeLessThan(1.5); expect(c.dy).toBeLessThan(1.5); expect(c.fits).toBe(true);
+  await expect(admin.locator('[aria-live=polite] [role=status]')).toHaveCount(0, { timeout: 15_000 }); // une notification en cours d'animation fausse la mesure de contraste
+  const axeRes = await new AxeBuilder({ page: admin }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(axeRes.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ') + ' ' + (n.any[0]?.message ?? '')).join(' | ')}`)).toEqual([]);
+  await admin.screenshot({ path: 'e2e/screens/16-identite-logo.png' });
+
+  // Un fichier qui n'est pas une image est refusé avec un message clair.
+  await admin.getByLabel('Choisir un fichier de logo').setInputFiles({ name: 'x.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') });
+  await expect(admin.getByText(/Format non accepté/)).toBeVisible();
+
+  // Tout le monde le voit : la fondatrice (autre navigateur) et l'écran de connexion (sans compte).
+  await founder.reload();
+  await expect.poll(async () => founder.evaluate(() => (document.querySelector('.side-logo img') as HTMLImageElement | null)?.src ?? '')).toMatch(/^blob:/);
+  const anon = await browser.newContext({ ...desktop, locale: 'fr-FR' });
+  const login = await anon.newPage();
+  await login.goto('/');
+  await expect.poll(async () => login.evaluate(() => (document.querySelector('img[alt="LinkLink"]') as HTMLImageElement | null)?.src ?? '')).toMatch(/^blob:/);
+  await anon.close();
+
+  // Les fondateurs sans fonction n'ont pas l'onglet Identité.
+  await go(founder, 'gouvernance');
+  await expect(founder.getByRole('tab', { name: 'Identité' })).toHaveCount(0);
+
+  // Retour au logo d'origine.
+  await admin.getByRole('button', { name: 'Rétablir le logo LinkLink' }).click();
+  await admin.getByRole('button', { name: 'Rétablir' }).last().click();
+  await expect(admin.getByText('Logo LinkLink d’origine')).toBeVisible();
+  await expect.poll(async () => (await centered()).src).toContain('/logo-symbol.png');
 });
 
 test('déconnexion et session conservée au rechargement', async () => {

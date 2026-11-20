@@ -2,6 +2,7 @@ import {
   cloneElement, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState,
   type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode,
 } from 'react';
+import { useBrand } from './brand';
 import { initials } from './format';
 import {
   LEVEL_LABEL, PRIORITY_LABEL, ROLE_LABEL, STATUS_LABEL, TASK_STATUS_LABEL,
@@ -221,9 +222,16 @@ export function Icon({ name, className = 'h-5 w-5' }: { name: IconName; classNam
   );
 }
 
-/** Logo officiel (charte §3) : image fournie, jamais recomposée. `symbol` = symbole seul (petites tailles, ≥ 32 px). */
+/**
+ * Logo officiel (charte §3) : image fournie, jamais recomposée. `symbol` = symbole seul (petites tailles, ≥ 32 px).
+ * Si la plateforme a un logo personnalisé (importé par la direction), il remplace les deux versions ;
+ * `object-contain` + `max-w-full` le gardent entier et centré dans son cadre, quelle que soit sa forme.
+ */
 export function Logo({ symbol = false, className = 'h-10' }: { symbol?: boolean; className?: string }) {
-  return <img src={symbol ? '/logo-symbol.png' : '/logo.png'} width={635} height={symbol ? 590 : 770} alt="LinkLink" className={`w-auto ${className}`} draggable={false} />;
+  const { logoUrl, pending } = useBrand();
+  const cls = `w-auto max-w-full object-contain ${className}${pending ? ' invisible' : ''}`;
+  if (logoUrl) return <img src={logoUrl} alt="LinkLink" className={cls} draggable={false} />;
+  return <img src={symbol ? '/logo-symbol.png' : '/logo.png'} width={635} height={symbol ? 590 : 770} alt="LinkLink" className={cls} draggable={false} />;
 }
 
 /** Icône colorée selon le type de fichier (cahier F-FILE-04). */

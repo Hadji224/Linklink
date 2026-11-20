@@ -16,7 +16,7 @@ export const FN_KEYS = Object.keys(FN_LABEL) as Fn[];
 export type Capability =
   | 'project.create' | 'project.delete' | 'project.reopen' | 'project.confirm_archive' | 'function.assign' | 'mandate.grant' | 'rules.edit'
   | 'finance.read' | 'expense.create' | 'expense.pay' | 'announce.internal' | 'announce.service' | 'crisis.publish' | 'comm.publish' | 'comm.prepare'
-  | 'comm.withdraw' | 'journal.business' | 'journal.security' | 'journal.emergency' | 'infra.read' | 'tech.ops' | 'account.suspend';
+  | 'comm.withdraw' | 'journal.business' | 'journal.security' | 'journal.emergency' | 'infra.read' | 'tech.ops' | 'account.suspend' | 'branding.edit';
 export const STATUS_LABEL: Record<ProjectStatus, string> = { active: 'Actif', paused: 'En pause', done: 'Terminé — à archiver', archived: 'Archivé' };
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { todo: 'À faire', doing: 'En cours', review: 'En révision', done: 'Terminé' };
 export const PRIORITY_LABEL: Record<Priority, string> = { urgent: 'Urgent', high: 'Élevée', medium: 'Moyenne', low: 'Basse' };
