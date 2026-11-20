@@ -19,9 +19,14 @@ export const filesApi = Router();
 
 const LEVELS = ['public', 'internal', 'confidential', 'strict'] as const;
 
+/** Pièces jointes des salons : relais temporaire (à la manière de WhatsApp). Les appareils gardent leur copie. */
+export const CHAT_RETENTION_DAYS = Number(process.env.CHAT_FILE_RETENTION_DAYS) || 30;
+export const CHAT_MAX_BYTES = (Number(process.env.CHAT_MAX_FILE_MB) || 10) * 1024 * 1024;
+
 interface FileRow {
   id: string; name: string; stored_name: string; mime: string; size: number; folder_id: string;
   channel_id: string | null; task_id: string | null; level: Level; user_id: string; uploader_name: string; created_at: string;
+  expires_at: string | null; purged_at: string | null;
 }
 const FILE_SELECT = `SELECT f.*, u.name AS uploader_name FROM files f JOIN users u ON u.id = f.user_id`;
 
@@ -36,6 +41,8 @@ function shapeFile(f: FileRow) {
     taskId: f.task_id,
     previewable: PREVIEWABLE.has(f.mime),
     createdAt: f.created_at,
+    expiresAt: f.expires_at,
+    expired: !!f.purged_at,
     uploadedBy: { id: f.user_id, name: f.uploader_name },
   };
 }
@@ -200,10 +207,16 @@ filesApi.post('/files', receiveFile, async (req, res) => {
     if ((await isInfraFolder(folderId)) && SECRET_NAME.test(name)) {
       throw new HttpError(422, "L'espace Infrastructure ne stocke aucun secret (clés, mots de passe, fichiers .env) : utilisez un gestionnaire de secrets et décrivez ici la procédure.");
     }
-    // Toutes les vérifications sont passées : on range le fichier (disque ou Google Drive), puis on l'enregistre.
-    key = await storage.put(file.path, { name, mime });
-    await db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
-            id, name, key, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(),
+    if (chanId && file.size > CHAT_MAX_BYTES) {
+      throw new HttpError(413, `Pièce jointe trop volumineuse pour un salon (${CHAT_MAX_BYTES / 1024 / 1024} Mo maximum). Pour un fichier plus lourd, déposez-le dans Documents.`);
+    }
+    // Toutes les vérifications sont passées : on range le fichier, puis on l'enregistre.
+    //  - pièce jointe de salon : relais temporaire en base, supprimé après CHAT_RETENTION_DAYS jours ;
+    //  - tâche ou Documents : disque ou Google Drive, conservé.
+    key = await storage.put(file.path, { name, mime }, chanId ? 'chat' : 'documents');
+    const expiresAt = chanId ? new Date(Date.now() + CHAT_RETENTION_DAYS * 86_400_000).toISOString() : null;
+    await db.prepare('INSERT INTO files (id,name,stored_name,mime,size,folder_id,channel_id,task_id,level,user_id,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(
+            id, name, key, mime, file.size, folderId, chanId, linkedTask, level, me(req).id, now(), expiresAt,
           );
     let message = null;
     if (chanId) {
@@ -246,8 +259,11 @@ filesApi.patch('/files/:id', async (req, res) => {
   res.json({ file: shapeFile(await loadFile(f.id) as FileRow) });
 });
 
+const EXPIRED_MSG = "Ce fichier a expiré sur le serveur. Si vous l'avez déjà ouvert sur cet appareil, il y est conservé ; sinon, demandez à son auteur de le renvoyer.";
+
 filesApi.get('/files/:id/download', async (req, res) => {
   const f = await fileForRead(req, idParam(req));
+  if (f.purged_at) throw new HttpError(410, EXPIRED_MSG);
   const obj = await storage.open(f.stored_name);
   if (f.level === 'confidential' || f.level === 'strict') {
     await logActivity(me(req), 'download', 'file', f.id, `Fichier ${f.level === 'strict' ? 'strictement confidentiel' : 'confidentiel'} « ${f.name} » téléchargé`, (await folderProjectId(f.folder_id)));
@@ -263,6 +279,7 @@ filesApi.get('/files/:id/download', async (req, res) => {
 filesApi.get('/files/:id/preview', async (req, res) => {
   const f = await fileForRead(req, idParam(req));
   if (!PREVIEWABLE.has(f.mime)) throw new HttpError(415, 'Aperçu indisponible pour ce type de fichier.');
+  if (f.purged_at) throw new HttpError(410, EXPIRED_MSG);
   const obj = await storage.open(f.stored_name);
   res.setHeader('Content-Type', f.mime);
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");

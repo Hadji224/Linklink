@@ -46,9 +46,9 @@ npm run test:e2e    # tests navigateur (Playwright) — voir docs/rapport-de-tes
 
 ## Configuration
 
-Voir `.env.example`. Variables principales : `DATABASE_URL` (PostgreSQL, obligatoire), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` (fichiers dans Google Drive), `PORT`, `DATA_DIR` (copies temporaires et journaux d'accès), `TRUST_PROXY`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `APP_URL`, `CORS_ORIGIN`, `SMTP_URL`, `MAIL_FROM`.
+Voir `.env.example`. Variables principales : `DATABASE_URL` (PostgreSQL, obligatoire), `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` (fichiers dans Google Drive), `PORT`, `DATA_DIR` (copies temporaires et journaux d'accès), `TRUST_PROXY`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `CHAT_FILE_RETENTION_DAYS` / `CHAT_MAX_FILE_MB` / `CHAT_STORE_BUDGET_MB` (pièces jointes des messages), `APP_URL`, `CORS_ORIGIN`, `SMTP_URL`, `MAIL_FROM`.
 
-Les données sont dans PostgreSQL et les fichiers dans Google Drive ([guide](docs/stockage-google-drive.md)) : le serveur lui-même ne garde rien d'essentiel. Sans Google Drive, les fichiers vont dans `DATA_DIR/uploads` (à placer sur un disque persistant).
+Les données sont dans PostgreSQL et les fichiers dans Google Drive ([guide](docs/stockage-google-drive.md)) : le serveur lui-même ne garde rien d'essentiel. Sans Google Drive, les fichiers vont dans `DATA_DIR/uploads` (à placer sur un disque persistant). Les pièces jointes des messages sont un relais temporaire en base (30 jours), l'appareil en gardant une copie, à la manière de WhatsApp.
 
 ## Mise en ligne
 
@@ -72,7 +72,7 @@ server/   API Express + WebSocket + PostgreSQL (pg), TypeScript
   src/access.ts fonctions, mandats, cumuls, capacités (can), journaux immuables
   src/perm.ts   règles d'accès (projets, salons, fichiers, confidentialité)
   src/db.ts     accès PostgreSQL asynchrone, migrations versionnées, transactions
-  src/storage.ts fichiers : Google Drive (OAuth) ou disque local
+  src/storage.ts fichiers : Google Drive (OAuth), disque local, relais temporaire en base (messages)
   src/jobs.ts   rappels automatiques
 web/      Interface React 19 + Tailwind v4 (Vite), charte graphique LinkLink v1.0
 e2e/      Tests navigateur (Playwright + axe)

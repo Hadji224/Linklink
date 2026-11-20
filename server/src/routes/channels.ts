@@ -15,12 +15,12 @@ export const channelsApi = Router();
 interface MessageJoinRow {
   id: string; channel_id: string; body: string; created_at: string;
   uid: string; uname: string;
-  fid: string | null; fname: string | null; fsize: number | null; fmime: string | null;
+  fid: string | null; fname: string | null; fsize: number | null; fmime: string | null; fexpires: string | null; fpurged: string | null;
 }
 
 const MESSAGE_SELECT = `
   SELECT m.id, m.channel_id, m.body, m.created_at, u.id AS uid, u.name AS uname,
-         f.id AS fid, f.name AS fname, f.size AS fsize, f.mime AS fmime
+         f.id AS fid, f.name AS fname, f.size AS fsize, f.mime AS fmime, f.expires_at AS fexpires, f.purged_at AS fpurged
   FROM messages m JOIN users u ON u.id = m.user_id LEFT JOIN files f ON f.id = m.file_id`;
 
 export function shapeMessage(r: MessageJoinRow) {
@@ -30,7 +30,7 @@ export function shapeMessage(r: MessageJoinRow) {
     body: r.body,
     createdAt: r.created_at,
     user: { id: r.uid, name: r.uname },
-    file: r.fid ? { id: r.fid, name: r.fname, size: r.fsize, mime: r.fmime } : null,
+    file: r.fid ? { id: r.fid, name: r.fname, size: r.fsize, mime: r.fmime, expiresAt: r.fexpires, expired: !!r.fpurged } : null,
   };
 }
 

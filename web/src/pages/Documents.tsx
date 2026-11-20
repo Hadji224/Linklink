@@ -309,13 +309,14 @@ export function FileBrowser({ rootFolderId, readOnly = false }: { rootFolderId?:
                 <p className="truncate font-semibold">{f.name}</p>
                 <p className="text-xs text-slate">
                   {formatSize(f.size)} · {f.uploadedBy.name} · {formatShortDate(f.createdAt)}
+                  {f.expired ? <> · <span className="font-semibold text-red-700">expiré sur le serveur</span></> : f.expiresAt ? <> · conservé jusqu’au {formatShortDate(f.expiresAt)}</> : null}
                   {searching && byId.get(f.folderId) && <> · <button className="font-semibold text-electric hover:underline" onClick={() => { setQ(''); setAuthor(''); setLevel(''); setFrom(''); setTo(''); setCurrent(f.folderId); }}>{byId.get(f.folderId)?.name}</button></>}
                 </p>
               </div>
               <LevelChip level={f.level} />
               <div className="flex items-center">
                 {f.previewable && <button className="rounded-lg p-2 text-slate hover:bg-mist hover:text-navy" aria-label={`Aperçu de ${f.name}`} onClick={() => setPreview(f)}><Icon name="eye" /></button>}
-                <button className="rounded-lg p-2 text-slate hover:bg-mist hover:text-navy" aria-label={`Télécharger ${f.name}`} onClick={() => void downloadFile(f.id, f.name)}><Icon name="download" /></button>
+                <button className="rounded-lg p-2 text-slate hover:bg-mist hover:text-navy" aria-label={`Télécharger ${f.name}`} onClick={() => void downloadFile(f.id, f.name).catch((e) => toast.error(e instanceof Error ? e.message : 'Téléchargement impossible.'))}><Icon name="download" /></button>
                 {canEdit(f) && <button className="rounded-lg p-2 text-slate hover:bg-mist hover:text-navy" aria-label={`Changer la confidentialité de ${f.name}`} onClick={() => setLevelFor(f)}><Icon name="lock" /></button>}
                 {!readOnly && canDelete(f) && <button className="rounded-lg p-2 text-slate hover:bg-red-50 hover:text-red-700" aria-label={`Supprimer ${f.name}`} onClick={() => void removeFile(f)}><Icon name="trash" /></button>}
               </div>

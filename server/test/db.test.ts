@@ -12,7 +12,7 @@ describe('Base PostgreSQL : migrations et données initiales', () => {
     await srv.restart();
     await srv.restart();
     expect(srv.codes).toEqual(first);
-    expect((await srv.sql('SELECT COUNT(*) AS n FROM schema_migrations')).rows[0].n).toBe(1);
+    expect((await srv.sql('SELECT COUNT(*) AS n FROM schema_migrations')).rows[0].n).toBe(2);
     expect((await srv.sql("SELECT COUNT(*) AS n FROM channels WHERE kind = 'channel'")).rows[0].n).toBe(2);
     expect((await srv.sql('SELECT COUNT(*) AS n FROM folders WHERE system IS NOT NULL')).rows[0].n).toBe(2);
     expect((await srv.sql("SELECT COUNT(*) AS n FROM settings WHERE key = 'jwt_secret'")).rows[0].n).toBe(1);

@@ -1,4 +1,19 @@
-# Stockage des fichiers dans Google Drive
+# Stockage des fichiers : Google Drive et pièces jointes temporaires
+
+## Quels fichiers vont où
+| Fichier | Où | Durée |
+|---|---|---|
+| **Documents** (module Documents) et **pièces jointes de tâches** | Google Drive (ou disque local si Drive n'est pas configuré) | Jusqu'à suppression |
+| **Pièces jointes des messages** (images, fichiers envoyés dans un salon ou un message direct) | **Base PostgreSQL**, en relais temporaire, comme WhatsApp | `CHAT_FILE_RETENTION_DAYS` jours (30 par défaut), puis supprimées du serveur |
+
+Pour les pièces jointes des messages :
+- **L'appareil garde sa copie.** Dès qu'une image s'affiche ou qu'un fichier est téléchargé, le navigateur en garde une copie sur l'appareil ; elle reste lisible même après suppression sur le serveur. Un fichier jamais ouvert avant l'échéance s'affiche « expiré » et l'auteur doit le renvoyer.
+- Taille maximale par pièce jointe : `CHAT_MAX_FILE_MB` (10 Mo). Au-delà, déposer le fichier dans Documents.
+- La place occupée en base est plafonnée (`CHAT_STORE_BUDGET_MB`, 300 Mo, pour rester sous les 0,5 Go de Neon gratuit) : au-delà, les plus anciennes pièces jointes sont retirées en premier.
+- La déconnexion volontaire efface les copies gardées sur l'appareil (ordinateur partagé) ; une session expirée les conserve.
+- Le message reste dans la discussion avec le nom et la taille du fichier, marqué « expiré ».
+
+# Stockage dans Google Drive
 
 Quand Google Drive est configuré, **chaque fichier envoyé dans LinkLink est rangé dans un dossier « LinkLink » de votre Drive**, jamais sur le serveur. Les téléchargements et aperçus passent par le serveur : les droits LinkLink (rôles, projets, niveaux de confidentialité) restent appliqués, et aucun lien Drive public n'est créé. Supprimer un fichier (ou un compte, droit à l'oubli) le supprime **définitivement** de Drive.
 

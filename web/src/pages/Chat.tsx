@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { api, downloadFile } from '../api';
+import { api } from '../api';
+import { ChatAttachment } from '../ChatAttachment';
 import { useAuth } from '../auth';
 import { useApp } from '../data';
 import { useCan } from '../perm';
-import { formatDay, formatSize, formatTime } from '../format';
+import { formatDay, formatTime } from '../format';
 import { useRealtime, useRealtimeEvents } from '../realtime';
 import type { Channel, Message } from '../types';
 import { Avatar, Badge, Empty, ErrorNote, Field, Icon, Modal, useToast } from '../ui';
@@ -252,17 +253,7 @@ export function ChatPanel({ channelId, active, onBack }: PanelProps) {
                   }`}
                 >
                   {!mine && !grouped && <p className="mb-0.5 text-xs font-bold text-electric">{m.user.name}</p>}
-                  {m.file && (
-                    <button
-                      onClick={() => m.file && void downloadFile(m.file.id, m.file.name)}
-                      aria-label={`Télécharger ${m.file.name}`}
-                      className={`mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${mine ? 'bg-white/15 hover:bg-white/25' : 'bg-mist hover:bg-line'}`}
-                    >
-                      <Icon name="download" className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{m.file.name}</span>
-                      <span className="shrink-0 text-xs opacity-80">{formatSize(m.file.size)}</span>
-                    </button>
-                  )}
+                  {m.file && <ChatAttachment file={m.file} mine={mine} onError={setError} />}
                   {m.body && <p className="whitespace-pre-wrap break-words">{renderBody(m.body, [...names], mine)}</p>}
                   <p className={`mt-0.5 text-right text-[11px] ${mine ? 'text-white' : 'text-slate'}`}>{formatTime(m.createdAt)}</p>
                 </div>

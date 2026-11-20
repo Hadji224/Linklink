@@ -47,7 +47,7 @@ const pool = new pg.Pool({
 pool.on('error', (e) => console.error('Connexion PostgreSQL inactive fermée :', e.message));
 
 export type Row = Record<string, any>;
-type Param = string | number | bigint | null | undefined;
+type Param = string | number | bigint | Buffer | string[] | null | undefined;
 
 const txStore = new AsyncLocalStorage<pg.PoolClient>();
 const runner = (): pg.Pool | pg.PoolClient => txStore.getStore() ?? pool;
@@ -107,7 +107,24 @@ export const closeDb = () => pool.end();
 
 // ─── Migrations ─────────────────────────────────────────────────────────────────────────────────
 // Chaque migration n'est exécutée qu'une fois (table schema_migrations). Pour faire évoluer la base : ajouter une entrée.
-const MIGRATIONS: { id: number; name: string; sql: string }[] = [{ id: 1, name: 'schéma initial (spécification v1.2)', sql: SCHEMA }];
+const MIGRATIONS: { id: number; name: string; sql: string }[] = [
+  { id: 1, name: 'schéma initial (spécification v1.2)', sql: SCHEMA },
+  {
+    id: 2,
+    name: 'pièces jointes des salons : stockage temporaire en base (file_blobs) et expiration',
+    sql: `
+      CREATE TABLE IF NOT EXISTS file_blobs (
+        key        TEXT PRIMARY KEY,
+        data       BYTEA NOT NULL,
+        size       INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      ALTER TABLE files ADD COLUMN IF NOT EXISTS expires_at TEXT;
+      ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_at TEXT;
+      CREATE INDEX IF NOT EXISTS idx_files_expiry ON files(expires_at) WHERE purged_at IS NULL AND expires_at IS NOT NULL;
+    `,
+  },
+];
 
 async function migrate() {
   await tx(async () => {

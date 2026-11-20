@@ -1,14 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { DATA_DIR, UPLOAD_DIR, getSetting, setSetting, uid } from './db.js';
+import { DATA_DIR, UPLOAD_DIR, db, getSetting, now, setSetting, uid } from './db.js';
 import { HttpError } from './http.js';
 
 /**
  * Stockage des fichiers déposés. Deux moteurs :
  *  - Google Drive (OAuth, jeton de renouvellement) quand GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET et GOOGLE_REFRESH_TOKEN sont définis ;
- *  - le disque local sinon (éphémère sur les hébergements gratuits : à éviter en production).
- * La clé enregistrée dans files.stored_name dit où est le fichier : « drive:<id> » ou un identifiant local.
+ *  - le disque local sinon (éphémère sur les hébergements gratuits : à éviter en production) ;
+ *  - la base de données (clés « db:<id> ») pour les pièces jointes des salons : relais temporaire à la manière de WhatsApp,
+ *    purgé après CHAT_FILE_RETENTION_DAYS jours ; les appareils gardent leur copie (cache du navigateur).
+ * La clé enregistrée dans files.stored_name dit où est le fichier : « drive:<id> », « db:<id> » ou un identifiant local.
  * Les deux moteurs coexistent : changer de moteur ne casse pas les anciens fichiers.
  */
 export const TMP_DIR = path.join(DATA_DIR, 'tmp');
@@ -187,23 +189,50 @@ const driveStore = {
   },
 };
 
+/* ------------------------------ Base de données (relais) ------------------------------ */
+const DB_KEY = /^db:[0-9a-f-]{36}$/;
+const dbStore = {
+  async put(tmpPath: string): Promise<string> {
+    const data = await fs.promises.readFile(tmpPath);
+    const key = `db:${uid()}`;
+    await db.run('INSERT INTO file_blobs (key,data,size,created_at) VALUES (?,?,?,?)', key, data, data.length, now());
+    await fs.promises.rm(tmpPath, { force: true });
+    return key;
+  },
+  async open(key: string): Promise<StoredObject> {
+    if (!DB_KEY.test(key)) throw notFound();
+    const row = await db.get<{ data: Buffer }>('SELECT data FROM file_blobs WHERE key = ?', key);
+    if (!row) throw new HttpError(410, 'Ce fichier a expiré sur le serveur. Si vous l\'avez déjà ouvert sur cet appareil, il y est conservé.');
+    return { stream: Readable.from([row.data]), size: row.data.length };
+  },
+  async remove(keys: string[]) {
+    const valid = keys.filter((k) => DB_KEY.test(k));
+    if (valid.length) await db.run('DELETE FROM file_blobs WHERE key = ANY(?)', valid as never);
+  },
+};
+
 /* ------------------------------------ Façade ------------------------------------ */
 export const storageName = () => (driveConfigured() ? 'drive' : 'local');
 const isDriveKey = (k: string) => k.startsWith('drive:');
+const isDbKey = (k: string) => k.startsWith('db:');
 
 export const storage = {
   /** Range le fichier reçu (chemin temporaire) et renvoie la clé à enregistrer. Le fichier temporaire disparaît. */
-  put(tmpPath: string, meta: PutMeta): Promise<string> {
+  put(tmpPath: string, meta: PutMeta, target: 'documents' | 'chat' = 'documents'): Promise<string> {
+    if (target === 'chat') return dbStore.put(tmpPath); // pièces jointes des salons : relais temporaire
     return driveConfigured() ? driveStore.put(tmpPath, meta) : local.put(tmpPath);
   },
   open(key: string): Promise<StoredObject> {
+    if (isDbKey(key)) return dbStore.open(key);
     if (!isDriveKey(key)) return local.open(key);
     if (!driveConfigured()) throw new HttpError(503, "Ce fichier est sur Google Drive, qui n'est pas configuré sur ce serveur.");
     return driveStore.open(key);
   },
   async remove(keys: string[]) {
+    const b = keys.filter(isDbKey);
     const d = keys.filter(isDriveKey);
-    const l = keys.filter((k) => !isDriveKey(k));
+    const l = keys.filter((k) => !isDriveKey(k) && !isDbKey(k));
+    if (b.length) await dbStore.remove(b);
     if (l.length) await local.remove(l);
     if (d.length) {
       if (!driveConfigured()) return console.error(`Google Drive non configuré : ${d.length} fichier(s) non supprimé(s)`);

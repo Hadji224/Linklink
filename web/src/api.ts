@@ -1,3 +1,5 @@
+import { getLocalFile, saveLocalFile } from './fileCache';
+
 const TOKEN_KEY = 'linklink_token';
 
 /** Adresse du serveur quand l'interface est hébergée à part (ex. Vercel → Render). Vide = même origine. */
@@ -75,16 +77,29 @@ export async function api<T>(path: string, options?: Options): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Contenu d'un fichier : d'abord la copie gardée sur cet appareil, sinon le serveur (avec authentification),
+ * puis on garde une copie locale. Un fichier expiré sur le serveur reste donc lisible là où il a déjà été ouvert.
+ */
+export async function fetchFileBlob(id: string, kind: 'preview' | 'download' = 'download'): Promise<Blob> {
+  const local = await getLocalFile(id);
+  if (local) return local;
+  const blob = await (await rawRequest(`/files/${id}/${kind}`)).blob();
+  void saveLocalFile(id, blob);
+  return blob;
+}
+
 /** Récupère un fichier (aperçu image) en gardant l'authentification ; renvoie une URL d'objet temporaire. */
 export async function fetchBlobUrl(path: string): Promise<string> {
+  const preview = /^\/files\/([^/]+)\/preview$/.exec(path);
+  if (preview) return URL.createObjectURL(await fetchFileBlob(preview[1] as string, 'preview'));
   const res = await rawRequest(path);
   return URL.createObjectURL(await res.blob());
 }
 
 /** Télécharge un fichier en conservant l'authentification (en-tête Authorization). */
 export async function downloadFile(id: string, name: string) {
-  const res = await rawRequest(`/files/${id}/download`);
-  const blob = await res.blob();
+  const blob = await fetchFileBlob(id, 'download');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

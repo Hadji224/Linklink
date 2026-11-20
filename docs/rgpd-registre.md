@@ -10,7 +10,8 @@ Responsable : LinkLink. Délégué : l'administrateur technique de la plateforme
 | Journal d'activité | Traçabilité (qui a fait quoi) | Nom, action, date | Idem | Intérêt légitime (sécurité) | Administrateur technique, PDG | Anonymisé à la suppression du compte |
 | Journaux d'accès | Sécurité, diagnostic | IP, identifiant, route, statut | Idem | Intérêt légitime (obligation de conservation) | Administrateur technique, PDG | 12 mois |
 | Sauvegardes | Continuité | Copie de la base (PostgreSQL / Neon) | Idem | Intérêt légitime | Administrateurs techniques ; sous-traitant : Neon | Historique Neon (selon l'offre) + copies à la demande |
-| Fichiers déposés | Partage de documents | Contenu des fichiers | Équipe | Intérêt légitime | Selon niveau de confidentialité ; sous-traitant : Google (Drive) | Jusqu'à suppression (définitive dans Drive) |
+| Fichiers déposés (Documents, tâches) | Partage de documents | Contenu des fichiers | Équipe | Intérêt légitime | Selon niveau de confidentialité ; sous-traitant : Google (Drive) | Jusqu'à suppression (définitive dans Drive) |
+| Pièces jointes des messages | Échange de fichiers dans les discussions | Contenu des fichiers | Participants du salon | Intérêt légitime | Selon l'accès au salon ; sous-traitant : Neon (base). Copie locale sur l'appareil de chaque lecteur (effacée à la déconnexion volontaire) | 30 jours sur le serveur (réglable), puis suppression automatique |
 
 ## Droits des personnes
 - **Accès / portabilité** : « Mon profil → Exporter mes données » (JSON).

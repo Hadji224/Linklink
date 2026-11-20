@@ -475,6 +475,35 @@ test('ordinateur portable : le menu latéral reste entièrement accessible quand
   await admin.setViewportSize(desktop.viewport);
 });
 
+test('pièces jointes : image dans la bulle avec icône de téléchargement, copie gardée sur l’appareil, « expirée » ailleurs', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const expired = (r: import('@playwright/test').Route) => r.fulfill({ status: 410, contentType: 'application/json', body: JSON.stringify({ error: 'Ce fichier a expiré sur le serveur.' }) });
+  await go(admin, 'messages');
+  await admin.getByRole('button', { name: '# général' }).click();
+  await admin.getByLabel('Choisir un fichier').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: png });
+  await expect(admin.getByRole('img', { name: 'photo.png' })).toBeVisible();
+  await expect(admin.getByRole('button', { name: 'Télécharger photo.png' }).first()).toBeVisible(); // icône toujours visible, pas seulement au survol
+  await expect.poll(() => admin.evaluate(async () => (await (await caches.open('ll-files-v1')).keys()).length)).toBeGreaterThan(0);
+  await admin.screenshot({ path: path.join(SCREENS, '15-piece-jointe-image.png') });
+
+  // Un autre appareil (sans copie locale) alors que le serveur a supprimé le fichier : message clair, pas d'erreur.
+  const ctxD = await browser.newContext({ ...desktop, locale: 'fr-FR', storageState: await ctxA.storageState() });
+  const other = await ctxD.newPage();
+  await other.route('**/api/files/*/preview', expired);
+  await other.goto('/#messages');
+  await other.getByRole('button', { name: '# général' }).click();
+  await expect(other.getByText('Photo expirée').first()).toBeVisible();
+  await ctxD.close();
+
+  // L'appareil qui l'avait déjà ouverte continue de l'afficher, même quand le serveur répond « expiré ».
+  await admin.route('**/api/files/*/preview', expired);
+  await admin.reload();
+  await go(admin, 'messages');
+  await admin.getByRole('button', { name: '# général' }).click();
+  await expect(admin.getByRole('img', { name: 'photo.png' })).toBeVisible();
+  await admin.unroute('**/api/files/*/preview');
+});
+
 test('grand écran : la molette défile même au-dessus des marges vides et le dernier bouton est atteignable', async () => {
   await admin.setViewportSize({ width: 1920, height: 600 });
   await go(admin, 'gouvernance');

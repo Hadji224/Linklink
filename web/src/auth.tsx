@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, getToken, setToken, setUnauthorizedHandler } from './api';
+import { clearLocalFiles } from './fileCache';
 import type { User } from './types';
 
 interface AuthState {
@@ -19,15 +20,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(() => getToken() !== null);
 
-  const logout = useCallback(() => {
+  // Session expirée : on garde les copies locales des fichiers (comme WhatsApp, elles restent sur l'appareil).
+  const expire = useCallback(() => {
     setToken(null);
     setUser(null);
   }, []);
+  // Déconnexion volontaire : on efface aussi les fichiers de l'équipe gardés sur cet appareil (ordinateur partagé).
+  const logout = useCallback(() => {
+    void clearLocalFiles();
+    expire();
+  }, [expire]);
 
   useEffect(() => {
-    setUnauthorizedHandler(logout);
+    setUnauthorizedHandler(expire);
     return () => setUnauthorizedHandler(null);
-  }, [logout]);
+  }, [expire]);
 
   const refreshMe = useCallback(async () => {
     const r = await api<{ user: User; can?: User['can'] }>('/me');

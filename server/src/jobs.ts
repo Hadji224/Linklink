@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { db, today } from './db.js';
+import { db, now, today } from './db.js';
+import { storage } from './storage.js';
 import { purgeOldLogs } from './logger.js';
 import { notify } from './notify.js';
 import { meetingAudience } from './routes/meetings.js';
@@ -47,14 +48,64 @@ export async function runReminders() {
   }
 }
 
+/** Plafond de place occupée par les pièces jointes des salons en base (Neon gratuit : 0,5 Go au total). */
+const CHAT_STORE_BUDGET = (Number(process.env.CHAT_STORE_BUDGET_MB) || 300) * 1024 * 1024;
+
+/** Marque les fichiers « expirés » (le message reste, avec le nom et la taille) et libère la place en base. */
+async function purgeKeys(keys: string[]) {
+  if (!keys.length) return 0;
+  await db.run("UPDATE files SET purged_at = ?, stored_name = 'expired' WHERE stored_name = ANY(?)", now(), keys as never);
+  await storage.remove(keys);
+  return keys.length;
+}
+
+/**
+ * Relais temporaire des pièces jointes de salons (modèle WhatsApp) :
+ *  1. supprime les fichiers arrivés à échéance (CHAT_FILE_RETENTION_DAYS, 30 jours par défaut) ;
+ *  2. si la place dépasse le plafond, supprime les plus anciens d'abord ;
+ *  3. nettoie les fichiers orphelins (envoi interrompu).
+ * Les appareils qui ont déjà ouvert le fichier en gardent une copie.
+ */
+export async function purgeChatFiles(): Promise<{ expired: number; overBudget: number; orphans: number }> {
+  const due = (await db.all<{ stored_name: string }>("SELECT stored_name FROM files WHERE purged_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ? AND stored_name LIKE 'db:%'", now())).map((r) => r.stored_name);
+  const expired = await purgeKeys(due);
+
+  // Place : on retire les plus anciens, un par un, jusqu'à repasser sous le plafond (et pas un de plus).
+  let overBudget = 0;
+  for (let round = 0; round < 20; round++) {
+    const total = (await db.get<{ n: number }>('SELECT COALESCE(SUM(size),0) AS n FROM file_blobs'))?.n ?? 0;
+    let excess = total - CHAT_STORE_BUDGET;
+    if (excess <= 0) break;
+    const oldest = await db.all<{ key: string; size: number }>('SELECT key, size FROM file_blobs ORDER BY created_at LIMIT 100');
+    if (!oldest.length) break;
+    const take: string[] = [];
+    for (const f of oldest) {
+      if (excess <= 0) break;
+      take.push(f.key);
+      excess -= f.size;
+    }
+    overBudget += await purgeKeys(take);
+  }
+
+  const orphanKeys = (await db.all<{ key: string }>('SELECT key FROM file_blobs WHERE created_at < ? AND key NOT IN (SELECT stored_name FROM files)', new Date(Date.now() - 86_400_000).toISOString())).map((r) => r.key);
+  if (orphanKeys.length) await storage.remove(orphanKeys);
+  return { expired, overBudget, orphans: orphanKeys.length };
+}
+
 export function startJobs() {
   const safe = (fn: () => Promise<void>) => async () => {
     try { await fn(); } catch (e) { console.error('Tâche planifiée en échec :', e); }
   };
   const hourly = safe(async () => { await runReminders(); await runValidationReminders(); await expireEmergency(); });
   const daily = safe(async () => { await purgeOldLogs(); });
+  const purge = safe(async () => {
+    const r = await purgeChatFiles();
+    if (r.expired || r.overBudget || r.orphans) console.log(`Pièces jointes des salons : ${r.expired} expirée(s), ${r.overBudget} retirée(s) (place), ${r.orphans} orpheline(s).`);
+  });
   void hourly();
   void daily();
+  void purge();
   setInterval(hourly, 10 * 60_000).unref();
   setInterval(daily, 6 * 3600_000).unref();
+  setInterval(purge, Number(process.env.CHAT_PURGE_EVERY_MS) || 3600_000).unref();
 }

@@ -62,6 +62,10 @@ export interface FileRef {
   name: string;
   size: number;
   mime: string;
+  /** Pièces jointes de salons : date à laquelle le serveur ne les garde plus (null = conservé). */
+  expiresAt?: string | null;
+  /** Le serveur ne l'a plus ; seule une copie déjà ouverte sur un appareil subsiste. */
+  expired?: boolean;
 }
 
 export interface Message {
