@@ -79,7 +79,7 @@ export function Team() {
       <PageHeader title="Équipe">
         <span className="text-sm text-slate">{members.length} membre{members.length > 1 ? 's' : ''} · {online} en ligne</span>
       </PageHeader>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-3xl">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_48rem)/2))]">
         <ErrorNote>{error}</ErrorNote>
         {canInvite && <p className="text-sm text-slate">Les fonctions (PDG, Caissier…) et les mandats se gèrent dans <a className="font-semibold text-electric" href="#gouvernance/fonctions">Gouvernance</a>. L'administration technique ne se transmet que par la procédure de <a className="font-semibold text-electric" href="#gouvernance/securite">transfert</a>.</p>}
         <ul className="space-y-2" aria-label="Membres">

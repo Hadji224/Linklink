@@ -69,7 +69,7 @@ export function Profile() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Mon profil" />
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-2xl">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_42rem)/2))]">
         <section className="card flex items-center gap-4 p-4">
           <Avatar name={user.name} size={56} />
           <div>

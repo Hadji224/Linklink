@@ -49,7 +49,7 @@ export function Governance({ tab }: { tab?: string }) {
           { id: 'securite', label: can('function.assign') || can('journal.security') ? 'Sécurité et urgence' : 'Urgence' },
         ]}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-4xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_56rem)/2))]">
         {current === 'validations' && <ValidationsTab pending={pending} />}
         {current === 'fonctions' && <FunctionsTab />}
         {current === 'mandats' && <MandatesTab />}

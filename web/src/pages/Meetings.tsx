@@ -213,7 +213,7 @@ export function Meetings() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Rendez-vous" />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-3xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_48rem)/2))]">
         <MeetingList />
       </div>
     </div>

@@ -78,7 +78,7 @@ export function Finances() {
       <PageHeader title="Finances">
         {can('expense.create') && <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" className="h-4 w-4" /> Nouvelle demande</button>}
       </PageHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-4xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_56rem)/2))]">
         <p className="mb-3 text-sm text-slate">Toute dépense suit le même parcours : <strong>demande</strong> → <strong>approbation du PDG</strong> → <strong>paiement par le Caissier</strong> (avec preuve) → <strong>justificatif</strong> → clôture. LinkLink ne gère pas d'argent : il trace les décisions.</p>
         {(toDecide > 0 || toPay > 0) && (
           <p role="status" className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-electric">

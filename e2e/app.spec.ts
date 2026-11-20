@@ -475,6 +475,19 @@ test('ordinateur portable : le menu latéral reste entièrement accessible quand
   await admin.setViewportSize(desktop.viewport);
 });
 
+test('grand écran : la molette défile même au-dessus des marges vides et le dernier bouton est atteignable', async () => {
+  await admin.setViewportSize({ width: 1920, height: 600 });
+  await go(admin, 'gouvernance');
+  await admin.getByRole('tab', { name: 'Fonctions' }).click();
+  const dernier = admin.getByRole('button', { name: 'Attribuer' }).last();
+  await expect(dernier).toBeVisible();
+  // Souris dans la marge vide à gauche du contenu (la page ne doit pas « ignorer » la molette).
+  await admin.mouse.move(330, 300);
+  await admin.mouse.wheel(0, 4000);
+  await expect(dernier).toBeInViewport();
+  await admin.setViewportSize(desktop.viewport);
+});
+
 test('déconnexion et session conservée au rechargement', async () => {
   await go(admin, 'accueil');
   await admin.reload();

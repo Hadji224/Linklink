@@ -76,7 +76,7 @@ export function Communications() {
           {can('crisis.publish') && <button className="btn btn-danger" onClick={() => setDialog('crisis')}>Communication de crise</button>}
         </div>
       </PageHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-4xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_56rem)/2))]">
         <p className="mb-3 text-sm text-slate">Un contenu officiel est <strong>préparé</strong> par n'importe quel fondateur, <strong>validé</strong> par des personnes distinctes selon son type, puis <strong>publié</strong> par le Chargé de communication. Toute modification après validation annule les validations.</p>
         {waiting > 0 && <p role="status" className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-electric">{waiting} contenu{waiting > 1 ? 's' : ''} attend{waiting > 1 ? 'ent' : ''} une action de votre part.</p>}
         <div role="group" aria-label="Filtrer" className="mb-3 flex gap-1">

@@ -44,7 +44,7 @@ function EntryList({ category, intro }: { category: 'business' | 'security' | 'e
     api<{ entries: Entry[] }>(`/journal/${category}?limit=200${q ? `&q=${encodeURIComponent(q)}` : ''}`).then((r) => { setItems(r.entries); setError(''); }).catch((e) => setError(e instanceof Error ? e.message : 'Chargement impossible.'));
   }, [category, q, epoch]);
   return (
-    <div className="h-full overflow-y-auto p-3 md:mx-auto md:max-w-3xl">
+    <div className="h-full overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_48rem)/2))]">
       <p className="mb-3 text-sm text-slate">{intro}</p>
       <input className="field mb-3" placeholder="Filtrer (nom, action…)" aria-label="Filtrer le journal" value={q} onChange={(e) => setQ(e.target.value)} />
       <ErrorNote>{error}</ErrorNote>
@@ -106,7 +106,7 @@ function Activity() {
   const { isAdmin } = useCan();
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:mx-auto md:w-full md:max-w-3xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:px-[max(0.75rem,calc((100%_-_48rem)/2))]">
         <p className="mb-3 text-sm text-slate">Qui a fait quoi, dans les projets, tâches et fichiers. Visible de l'administrateur technique et du PDG. {isAdmin && <button className="font-semibold text-electric underline" onClick={() => void showLogs()}>Logs d'accès récents</button>}</p>
         <input className="field mb-3" placeholder="Filtrer (nom, action…)" aria-label="Filtrer le journal" value={q} onChange={(e) => setQ(e.target.value)} />
         <ErrorNote>{error}</ErrorNote>
