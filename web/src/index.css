@@ -216,6 +216,9 @@ aside :focus-visible {
 }
 .icon-btn:hover:not(:disabled) { background: var(--color-cloud); color: var(--color-ink); }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Sur fond bleu (menu « Plus » du téléphone) */
+.icon-btn-light { color: white; }
+.icon-btn-light:hover:not(:disabled) { background: rgb(255 255 255 / 0.18); color: white; }
 @media (pointer: coarse) {
   .btn-sm,
   .icon-btn { min-height: 44px; }

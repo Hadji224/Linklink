@@ -159,12 +159,12 @@ function Shell() {
       </nav>
 
       {more && (
-        <Modal title="Plus" onClose={() => setMore(false)}>
+        <Modal title="Plus" blue onClose={() => setMore(false)}>
           <ul className="space-y-1">
             {secondary.map((n) => (
               <li key={n.id}>
-                <a href={link(n.id)} className="flex items-center gap-3 rounded-xl px-3 py-3 font-semibold hover:bg-mist">
-                  <Icon name={n.icon} className="h-5 w-5 text-electric" />
+                <a href={link(n.id)} className="flex items-center gap-3 rounded-xl px-3 py-3 font-semibold text-white hover:bg-white/15">
+                  <Icon name={n.icon} className="h-5 w-5 text-white" />
                   {n.label}
                   <Badge n={n.count ?? 0} className="ml-auto" />
                 </a>

@@ -589,6 +589,20 @@ test('boutons visibles (fond coloré) et logo centré ; import, affichage partou
   await expect.poll(async () => (await centered()).src).toContain('/logo-symbol.png');
 });
 
+test('téléphone : le menu « Plus » est bleu LinkLink, lisible (axe) et ses liens fonctionnent', async () => {
+  await go(guest, 'accueil');
+  await guest.getByRole('button', { name: 'Plus' }).click();
+  const dialog = guest.getByRole('dialog', { name: 'Plus' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS('background-color', 'rgb(19, 95, 234)');
+  await guest.waitForTimeout(500);
+  const res = await new AxeBuilder({ page: guest }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(res.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
+  await guest.screenshot({ path: 'e2e/screens/17-menu-plus-bleu.png' });
+  await dialog.getByRole('link', { name: 'Équipe' }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test('déconnexion et session conservée au rechargement', async () => {
   await go(admin, 'accueil');
   await admin.reload();

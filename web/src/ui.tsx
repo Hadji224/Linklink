@@ -407,7 +407,7 @@ function useDialog(ref: React.RefObject<HTMLDivElement | null>, onClose: () => v
   }, [ref]);
 }
 
-export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide = false, blue = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; blue?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (
@@ -418,11 +418,11 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={`sheet flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white md:rounded-3xl ${wide ? 'md:max-w-3xl' : 'md:max-w-lg'}`}
+        className={`sheet flex max-h-[92dvh] w-full flex-col rounded-t-3xl md:rounded-3xl ${blue ? 'bg-electric text-white' : 'bg-white'} ${wide ? 'md:max-w-3xl' : 'md:max-w-lg'}`}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
-          <h2 className="t-h4">{title}</h2>
-          <button data-close onClick={onClose} className="icon-btn" aria-label="Fermer">
+        <div className={`flex items-center justify-between gap-3 border-b px-5 py-3 ${blue ? 'border-white/25' : 'border-line'}`}>
+          <h2 className={`t-h4${blue ? ' !text-white' : ''}`}>{title}</h2>
+          <button data-close onClick={onClose} className={`icon-btn ${blue ? 'icon-btn-light' : ''}`} aria-label="Fermer">
             <Icon name="x" />
           </button>
         </div>
