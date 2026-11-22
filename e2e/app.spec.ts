@@ -546,9 +546,10 @@ test('boutons visibles (fond coloré) et logo centré ; import, affichage partou
     const tile = document.querySelector('.side-logo') as HTMLElement;
     const img = tile.querySelector('img') as HTMLElement;
     const t = tile.getBoundingClientRect(), i = img.getBoundingClientRect();
-    return { dx: Math.abs((t.left + t.right) / 2 - (i.left + i.right) / 2), dy: Math.abs((t.top + t.bottom) / 2 - (i.top + i.bottom) / 2), fits: i.width <= t.width && i.height <= t.height, src: (img as HTMLImageElement).src };
+    return { square: Math.abs(t.width - t.height), dx: Math.abs((t.left + t.right) / 2 - (i.left + i.right) / 2), dy: Math.abs((t.top + t.bottom) / 2 - (i.top + i.bottom) / 2), fits: i.width <= t.width && i.height <= t.height, src: (img as HTMLImageElement).src };
   });
   let c = await centered();
+  expect(c.square).toBeLessThan(1); // tuile carrée aux coins arrondis, nom à droite
   expect(c.dx).toBeLessThan(1.5); expect(c.dy).toBeLessThan(1.5); expect(c.fits).toBe(true);
 
   // Import d'un logo très large (400 × 100) : il reste entier et centré.

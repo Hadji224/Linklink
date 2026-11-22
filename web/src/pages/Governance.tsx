@@ -374,8 +374,9 @@ function IdentityTab() {
       <p className="text-sm text-slate">Le logo s’affiche dans le menu de gauche (ordinateur) et sur l’écran de connexion, pour toute l’équipe. Formats : PNG, JPEG ou WebP, 1 Mo maximum. Un fond transparent (PNG) donne le meilleur rendu ; l’image est automatiquement réduite et centrée.</p>
       <ErrorNote>{error}</ErrorNote>
       <div className="card flex flex-wrap items-center gap-5 p-4">
-        <div className="flex h-28 w-52 items-center justify-center overflow-hidden rounded-2xl bg-navy p-3" aria-label="Aperçu du logo dans le menu">
-          <div className="flex h-full w-full items-center justify-center rounded-xl bg-white p-2"><Logo symbol className="h-full" /></div>
+        <div className="flex h-28 w-52 items-center gap-3 overflow-hidden rounded-2xl bg-navy p-3 text-white" aria-label="Aperçu du logo dans le menu">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2"><Logo symbol className="h-full" /></div>
+          <span className="min-w-0"><span className="block truncate text-lg font-extrabold">LinkLink</span><span className="block truncate text-xs text-blue-200">Espace de l’équipe</span></span>
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <p className="font-semibold">{logoUrl ? 'Logo personnalisé' : 'Logo LinkLink d’origine'}</p>

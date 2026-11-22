@@ -76,8 +76,14 @@ function Shell() {
 
       {/* Navigation latérale (ordinateur) : fond bleu nuit, logo sur tuile blanche (charte §3.3) */}
       <aside className="side hidden min-h-0 w-60 shrink-0 flex-col overflow-y-auto bg-navy p-3 text-white md:flex">
-        <a href="#accueil" className="side-logo mb-4 flex h-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-3" aria-label="LinkLink — Accueil">
-          <Logo symbol className="h-full" />
+        <a href="#accueil" className="side-brand mb-4 flex shrink-0 items-center gap-3 rounded-2xl p-1 hover:bg-white/10" aria-label="LinkLink — Accueil">
+          <span className="side-logo flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2">
+            <Logo symbol className="h-full" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-xl font-extrabold leading-tight">LinkLink</span>
+            <span className="block truncate text-xs text-blue-200">Espace de l’équipe</span>
+          </span>
         </a>
         <nav className="space-y-1" aria-label="Navigation principale">
           {MAIN.map((n) => (
