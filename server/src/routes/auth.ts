@@ -22,7 +22,7 @@ const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email('Adresse e-mail invalide.').max(200),
   password: z.string().min(8, 'Le mot de passe doit faire au moins 8 caractères.').max(200),
   inviteCode: z.string().trim().max(40).optional().default(''),
-  consent: z.literal(true, { errorMap: () => ({ message: "Vous devez accepter la politique de confidentialité pour créer un compte." }) }),
+  consent: z.literal(true, { error: "Vous devez accepter la politique de confidentialité pour créer un compte." }),
 });
 
 publicApi.post('/auth/register', limitAuthAttempts, async (req, res) => {
