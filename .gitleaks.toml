@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+# Les exemples de documentation (adresse PostgreSQL d'exemple) ne sont pas des secrets.
+[allowlist]
+description = "exemples et fixtures de test"
+paths = ['''docs/.*''', '''\.env\.example''', '''server/test/fixtures/.*''']
