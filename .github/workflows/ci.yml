@@ -49,6 +49,6 @@ jobs:
       # Dépendances de production : une vulnérabilité haute ou critique fait échouer la CI.
       - run: npm audit --omit=dev --audit-level=high
       - name: Analyse de secrets dans l'historique Git
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
