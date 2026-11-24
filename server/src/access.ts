@@ -49,6 +49,14 @@ export async function ownFunctions(userId: string): Promise<Fn[]> {
   return (await db.prepare('SELECT fn FROM user_functions WHERE user_id = ? AND ended_at IS NULL').all(userId) as { fn: Fn }[]).map((r) => r.fn);
 }
 
+/** Fonctions en cours de tous les comptes en une seule requête (listes : évite une requête par personne). */
+export async function functionsByUser(): Promise<Map<string, Fn[]>> {
+  const rows = await db.prepare('SELECT user_id, fn FROM user_functions WHERE ended_at IS NULL').all() as { user_id: string; fn: Fn }[];
+  const out = new Map<string, Fn[]>();
+  for (const r of rows) out.set(r.user_id, [...(out.get(r.user_id) ?? []), r.fn]);
+  return out;
+}
+
 export interface MandateRow {
   id: string; grantor_id: string | null; grantee_id: string; scope: MandateScope; fn: Fn | null;
   validation_type: ValidationType | null; for_user_id: string | null; reason: string;

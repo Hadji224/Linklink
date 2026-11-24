@@ -1,4 +1,6 @@
-import bcrypt from 'bcryptjs';
+import type { Request } from 'express';
+import { hashPassword, verifyPassword } from '../passwords.js';
+import { assertAccountOpen, recordAuthFailure } from '../ratelimit.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
@@ -354,16 +356,22 @@ governanceApi.post('/emergency/code', async (req, res) => {
   const { code, password } = parse(z.object({ code: z.string().min(10, 'Le code doit faire au moins 10 caractères.').max(100), password: z.string().min(1) }), req.body);
   if (!(await emergencyHolders()).some((h) => h.user_id === user.id)) throw await deny(user, 'emergency_code_not_holder', "Vous n'êtes pas détenteur d'un accès d'urgence.");
   const row = await db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id) as { password_hash: string };
-  if (!bcrypt.compareSync(password, row.password_hash)) throw new HttpError(403, 'Mot de passe incorrect.');
-  await db.prepare('UPDATE emergency_holders SET code_hash = ?, code_set_at = ? WHERE user_id = ?').run(bcrypt.hashSync(code, 10), now(), user.id);
+  await assertAccountOpen(`pw:${user.id}`);
+  if (!(await verifyPassword(password, row.password_hash)).ok) {
+    await recordAuthFailure(req, `pw:${user.id}`, 'code d\'urgence');
+    throw new HttpError(403, 'Mot de passe incorrect.');
+  }
+  await db.prepare('UPDATE emergency_holders SET code_hash = ?, code_set_at = ? WHERE user_id = ?').run(await hashPassword(code), now(), user.id);
   await audit(user, 'emergency', 'emergency_code_set', 'emergency', user.id, `${user.name} a défini son code d'urgence`);
   res.json({ emergency: (await shapeEmergency(user)) });
 });
 
-async function checkCode(user: AuthUser, code: string) {
+async function checkCode(user: AuthUser, code: string, req: Request) {
   const h = (await emergencyHolders()).find((x) => x.user_id === user.id);
   if (!h?.code_hash) throw await deny(user, 'emergency_no_code', "Vous n'avez pas de code d'urgence valide.");
-  if (!bcrypt.compareSync(code, h.code_hash)) {
+  await assertAccountOpen(`emergency:${user.id}`);
+  if (!(await verifyPassword(code, h.code_hash)).ok) {
+    await recordAuthFailure(req, `emergency:${user.id}`, 'code d\'urgence');
     await audit(user, 'emergency', 'emergency_bad_code', 'emergency', '', `Code d'urgence incorrect saisi par ${user.name}`, { result: 'denied' });
     await notifyMany([...(await pdgIds()), ...(await adminIds())], { type: 'security', category: 'urgent', title: `Code d'urgence incorrect : ${user.name}`, link: '#journal' }, user.id);
     throw new HttpError(403, "Code d'urgence incorrect.");
@@ -377,7 +385,7 @@ governanceApi.post('/emergency/sessions', async (req, res) => {
   if ((await currentSession())) throw new HttpError(409, "Une procédure d'urgence est déjà en cours.");
   const hs = await emergencyHolders();
   if (hs.length !== 2 || hs.some((h) => !h.code_hash)) throw new HttpError(409, "Les deux détenteurs doivent d'abord être désignés et avoir défini leur code.");
-  await checkCode(user, code);
+  await checkCode(user, code, req);
   const id = uid();
   await db.prepare("INSERT INTO emergency_sessions (id,state,first_holder,created_at,expires_at,note) VALUES (?,?,?,?,?,?)").run(id, 'pending', user.id, now(), new Date(Date.now() + EMERGENCY_PENDING_MIN * 60_000).toISOString(), note);
   await audit(user, 'emergency', 'emergency_start', 'emergency', id, `${user.name} a demandé un accès d'urgence — seconde confirmation attendue`, { details: note });
@@ -393,7 +401,7 @@ governanceApi.post('/emergency/sessions/:id/confirm', async (req, res) => {
   const s = await currentSession();
   if (!s || s.id !== idParam(req) || s.state !== 'pending') throw new HttpError(409, 'Aucune demande en attente de confirmation (elle a peut-être expiré).');
   if (s.first_holder === user.id) throw new HttpError(403, "L'activation exige deux personnes différentes : vous ne pouvez pas confirmer votre propre demande.");
-  await checkCode(user, code);
+  await checkCode(user, code, req);
   await db.prepare("UPDATE emergency_sessions SET state='active', second_holder=?, activated_at=?, expires_at=? WHERE id=?").run(user.id, now(), new Date(Date.now() + EMERGENCY_ACTIVE_H * 3600_000).toISOString(), s.id);
   await audit(user, 'emergency', 'emergency_activate', 'emergency', s.id, `Accès d'urgence activé par ${(await nameOf(s.first_holder))} et ${user.name} (durée limitée : ${EMERGENCY_ACTIVE_H} h)`);
   const everyone = (await db.prepare("SELECT id FROM users WHERE suspended_at IS NULL AND role <> 'guest'").all() as { id: string }[]).map((r) => r.id);
@@ -425,7 +433,7 @@ governanceApi.post('/emergency/sessions/:id/admin-reset', async (req, res) => {
   const { newPassword } = parse(z.object({ newPassword: z.string().min(12, 'Le mot de passe doit faire au moins 12 caractères.').max(200) }), req.body);
   const admin = await db.prepare("SELECT id, name FROM users WHERE role = 'admin' AND suspended_at IS NULL LIMIT 1").get() as { id: string; name: string } | undefined;
   if (!admin) throw new HttpError(404, "Aucun administrateur technique actif.");
-  await db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), admin.id);
+  await db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(await hashPassword(newPassword), admin.id);
   disconnectUser(admin.id);
   await audit(user, 'emergency', 'emergency_admin_reset', 'user', admin.id, `Mot de passe de l'administrateur technique ${admin.name} réinitialisé par ${user.name}`);
   const everyone = (await db.prepare("SELECT id FROM users WHERE suspended_at IS NULL AND role <> 'guest'").all() as { id: string }[]).map((r) => r.id);

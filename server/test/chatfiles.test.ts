@@ -36,7 +36,7 @@ describe('Pièces jointes des salons : relais temporaire (modèle WhatsApp)', ()
   });
 
   it('le contenu exact (octets bruts) est restitué au téléchargement et à l’aperçu', async () => {
-    const bytes = Buffer.from([0, 255, 10, 13, 200, 1, 2, 3]);
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 255, 10, 13, 200, 1, 2, 3]);
     const fd = new FormData();
     fd.append('channelId', general);
     fd.append('file', new Blob([bytes], { type: 'image/png' }), 'Éléphant.png');

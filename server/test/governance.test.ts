@@ -344,3 +344,17 @@ describe('SE — suspension, urgence, rétention (§12)', () => {
     expect((await I.upload({ name: 'procedure-restauration.pdf', content: '%PDF' }, { folderId: infra.id })).status).toBe(201);
   });
 });
+
+describe('Paiements simultanés', () => {
+  it('deux paiements partiels envoyés en même temps ne peuvent jamais dépasser le montant approuvé', async () => {
+    const id = (await M.post('/expenses', { beneficiary: 'Fournisseur Sarl', amount: 150000, currency: 'GNF', reason: 'Test concurrence', submit: true })).data.expense.id;
+    expect((await P.post(`/expenses/${id}/decision`, { decision: 'approve' })).data.expense.status).toBe('awaiting_payment');
+    const results = await Promise.all([
+      T.post(`/expenses/${id}/payments`, { amount: 100000, proof: 'Reçu A' }),
+      T.post(`/expenses/${id}/payments`, { amount: 100000, proof: 'Reçu B' }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    const total = (await sql("SELECT COALESCE(SUM(amount_minor),0) AS n FROM expense_payments WHERE expense_id = ? AND status = 'recorded'", id)).rows[0].n;
+    expect(total).toBeLessThanOrEqual(150000 * 100);
+  });
+});

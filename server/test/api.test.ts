@@ -459,13 +459,15 @@ describe('Messagerie (F-MSG) : salons, DM, non lus, temps réel', () => {
     expect(older.messages.length).toBeGreaterThan(0);
   }, 20_000);
   it('temps réel : le message privé ne parvient qu\'à ses deux participants', async () => {
-    const open = (c: Client) =>
-      new Promise<{ ws: WebSocket; got: any[] }>((resolve) => {
-        const ws = new WebSocket(`${srv.url.replace('http', 'ws')}/ws?token=${c.token}`);
+    const open = async (c: Client) => {
+      const ticket = (await c.post('/ws-ticket')).data.ticket as string;
+      return new Promise<{ ws: WebSocket; got: any[] }>((resolve) => {
+        const ws = new WebSocket(`${srv.url.replace('http', 'ws')}/ws?ticket=${ticket}`);
         const got: any[] = [];
         ws.on('message', (d) => got.push(JSON.parse(String(d))));
         ws.on('open', () => resolve({ ws, got }));
       });
+    };
     const a = await open(admin);
     const g = await open(guest);
     await founder.post(`/channels/${dm}/messages`, { body: 'ping' });

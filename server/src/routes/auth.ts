@@ -1,16 +1,16 @@
-import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { z } from 'zod';
-import { limitAuthAttempts, requireAdmin, requireAuth, requireStaff, signToken } from '../auth.js';
+import { requireAdmin, requireAuth, requireStaff, signToken } from '../auth.js';
 import { logActivity } from '../activity.js';
-import { audit, capabilitiesOf, functionsOf, ownFunctions } from '../access.js';
-import { db, ensureBootstrapPdg, getSetting, newInviteCode, now, setSetting, tx, uid, type Role, type UserRow } from '../db.js';
+import { audit, capabilitiesOf, functionsByUser, functionsOf, ownFunctions } from '../access.js';
+import { db, ensureBootstrapPdg, getSetting, INVITE_TTL_DAYS, newInviteCode, now, setSetting, tx, uid, type Role, type UserRow } from '../db.js';
+import crypto from 'node:crypto';
+import { hashPassword, safeEqual, verifyDummy, verifyPassword } from '../passwords.js';
+import { assertAccountOpen, authGate, clearAccountFailures, recordAuthFailure } from '../ratelimit.js';
 import { HttpError, idParam, me, parse } from '../http.js';
 import { disconnectUser, emitAll, onlineUserIds } from '../realtime.js';
 import { handOverTasksOf } from '../taskrules.js';
 import { removeStored } from '../uploads.js';
-import { storageName } from '../storage.js';
-import { mapA } from "../async.js";
 
 export const publicApi = Router();
 export const accountApi = Router();
@@ -22,28 +22,63 @@ const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email('Adresse e-mail invalide.').max(200),
   password: z.string().min(8, 'Le mot de passe doit faire au moins 8 caractères.').max(200),
   inviteCode: z.string().trim().max(40).optional().default(''),
+  /** Seulement pour le tout premier compte : secret d'initialisation défini sur le serveur (BOOTSTRAP_SECRET). */
+  bootstrapSecret: z.string().max(200).optional().default(''),
   consent: z.literal(true, { error: "Vous devez accepter la politique de confidentialité pour créer un compte." }),
 });
 
-publicApi.post('/auth/register', limitAuthAttempts, async (req, res) => {
+/** Serveur hébergé (Render, Vercel…) ou en production : le premier compte exige alors un secret d'initialisation. */
+const HOSTED = () => process.env.NODE_ENV === 'production' || !!process.env.RENDER || !!process.env.VERCEL;
+
+const inviteStatus = async (kind: 'member' | 'guest') => {
+  const prefix = kind === 'guest' ? 'guest_invite_code' : 'invite_code';
+  const code = (await getSetting(prefix)) ?? '';
+  const expiresAt = (await getSetting(`${prefix}_expires_at`)) ?? null;
+  return { code, expiresAt, expired: !!expiresAt && Date.parse(expiresAt) <= Date.now() };
+};
+
+publicApi.post('/auth/register', authGate, async (req, res) => {
   const input = parse(registerSchema, req.body);
-  const isFirst = (await db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0;
-  let role: Role = 'admin';
-  if (!isFirst) {
-    const code = input.inviteCode.toUpperCase();
-    if (code && code === ((await getSetting('invite_code')) ?? '').toUpperCase()) role = 'member';
-    else if (code && code === ((await getSetting('guest_invite_code')) ?? '').toUpperCase()) role = 'guest';
-    else throw new HttpError(403, "Code d'invitation incorrect.");
-  }
-  if ((await db.prepare('SELECT 1 FROM users WHERE email = ?').get(input.email))) {
-    throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée.');
-  }
+  const passwordHash = await hashPassword(input.password); // calculé hors transaction : le verrou n'est pas tenu pendant le hachage
   const id = uid();
   const t = now();
-  await db.prepare('INSERT INTO users (id,name,email,password_hash,role,consented_at,created_at) VALUES (?,?,?,?,?,?,?)').run(
-        id, input.name, input.email, bcrypt.hashSync(input.password, 10), role, t, t,
+  let role: Role = 'admin';
+  let isFirst = false;
+  try {
+    // Tout se décide sous le verrou de transaction (valable aussi entre plusieurs instances) : un seul « premier compte ».
+    await tx(async () => {
+      isFirst = (await db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0;
+      if (isFirst) {
+        const secret = process.env.BOOTSTRAP_SECRET;
+        if (!secret) {
+          if (HOSTED()) throw new HttpError(503, "Initialisation verrouillée : l'exploitant du serveur doit d'abord définir la variable BOOTSTRAP_SECRET, puis vous communiquer ce secret.");
+        } else if (!safeEqual(input.bootstrapSecret, secret)) {
+          throw new HttpError(403, "Code d'initialisation incorrect.");
+        }
+      } else {
+        const member = await inviteStatus('member');
+        const guest = await inviteStatus('guest');
+        const code = input.inviteCode.toUpperCase();
+        if (code && member.code && safeEqual(code, member.code.toUpperCase())) {
+          if (member.expired) throw new HttpError(403, "Ce code d'invitation a expiré : demandez-en un nouveau à un fondateur.");
+          role = 'member';
+        } else if (code && guest.code && safeEqual(code, guest.code.toUpperCase())) {
+          if (guest.expired) throw new HttpError(403, "Ce code d'invitation a expiré : demandez-en un nouveau à un fondateur.");
+          role = 'guest';
+        } else throw new HttpError(403, "Code d'invitation incorrect.");
+      }
+      if ((await db.prepare('SELECT 1 FROM users WHERE email = ?').get(input.email))) {
+        throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée.');
+      }
+      await db.prepare('INSERT INTO users (id,name,email,password_hash,role,consented_at,created_at) VALUES (?,?,?,?,?,?,?)').run(
+        id, input.name, input.email, passwordHash, role, t, t,
       );
-  if (isFirst) await ensureBootstrapPdg(); // l'administrateur technique tient la fonction PDG tant qu'aucun fondateur ne la reçoit
+      if (isFirst) await ensureBootstrapPdg(); // l'administrateur technique tient la fonction PDG tant qu'aucun fondateur ne la reçoit
+    });
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 403) await recordAuthFailure(req, undefined, 'inscription');
+    throw e;
+  }
   const user = { id, name: input.name, email: input.email, role, functions: (await ownFunctions(id)) };
   await logActivity(user, 'register', 'user', id, `${input.name} a rejoint l'équipe (${role})`);
   emitAll({ type: 'members' });
@@ -55,12 +90,18 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Le mot de passe est obligatoire.'),
 });
 
-publicApi.post('/auth/login', limitAuthAttempts, async (req, res) => {
+publicApi.post('/auth/login', authGate, async (req, res) => {
   const input = parse(loginSchema, req.body);
+  await assertAccountOpen(input.email);
   const row = await db.prepare('SELECT * FROM users WHERE email = ?').get(input.email) as unknown as UserRow | undefined;
-  if (!row || !bcrypt.compareSync(input.password, row.password_hash)) {
+  if (!row) await verifyDummy(input.password); // même durée de calcul : on ne révèle pas si l'adresse existe
+  const check = row ? await verifyPassword(input.password, row.password_hash) : { ok: false, rehash: false };
+  if (!row || !check.ok) {
+    await recordAuthFailure(req, input.email);
     throw new HttpError(401, 'E-mail ou mot de passe incorrect.');
   }
+  await clearAccountFailures(input.email);
+  if (check.rehash) await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(await hashPassword(input.password), row.id);
   if (row.suspended_at) {
     await audit({ id: row.id, name: row.name }, 'security', 'login_suspended', 'user', row.id, 'Connexion refusée : compte suspendu', { result: 'denied' });
     throw new HttpError(403, "Ce compte est suspendu. Contactez le PDG ou l'administrateur technique.");
@@ -69,12 +110,14 @@ publicApi.post('/auth/login', limitAuthAttempts, async (req, res) => {
 });
 
 publicApi.get('/setup', async (_req, res) => {
-  res.json({ hasUsers: (await db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n > 0 });
+  const hasUsers = (await db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n > 0;
+  // Avant le premier compte : l'écran d'inscription demande le secret d'initialisation (ou explique qu'il manque).
+  res.json({ hasUsers, bootstrapRequired: !hasUsers && !!process.env.BOOTSTRAP_SECRET, bootstrapLocked: !hasUsers && !process.env.BOOTSTRAP_SECRET && HOSTED() });
 });
 
 publicApi.get('/health', async (_req, res) => {
   await db.prepare('SELECT 1').get();
-  res.json({ ok: true, time: now(), storage: storageName() });
+  res.json({ ok: true, time: now() });
 });
 
 /* ------------------------------ Compte connecté ------------------------------ */
@@ -109,7 +152,7 @@ accountApi.patch('/me', async (req, res) => {
   res.json({ user: (await publicUser({ ...cur, name: input.name ?? cur.name, email: input.email ?? cur.email })) });
 });
 
-accountApi.post('/me/password', limitAuthAttempts, async (req, res) => {
+accountApi.post('/me/password', authGate, async (req, res) => {
   const input = parse(
     z.object({
       current: z.string().min(1, 'Mot de passe actuel requis.'),
@@ -118,9 +161,13 @@ accountApi.post('/me/password', limitAuthAttempts, async (req, res) => {
     req.body,
   );
   const row = await db.prepare('SELECT * FROM users WHERE id = ?').get(me(req).id) as unknown as UserRow;
-  if (!bcrypt.compareSync(input.current, row.password_hash)) throw new HttpError(403, 'Mot de passe actuel incorrect.');
+  await assertAccountOpen(`pw:${row.id}`);
+  if (!(await verifyPassword(input.current, row.password_hash)).ok) {
+    await recordAuthFailure(req, `pw:${row.id}`, 'changement de mot de passe');
+    throw new HttpError(403, 'Mot de passe actuel incorrect.');
+  }
   await db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(
-        bcrypt.hashSync(input.next, 10), row.id,
+        await hashPassword(input.next), row.id,
       );
   await logActivity(me(req), 'password', 'user', row.id, 'Mot de passe modifié');
   const fresh = { id: row.id, token_version: row.token_version + 1 };
@@ -169,10 +216,14 @@ async function assertNotLastAdmin(userId: string) {
 }
 
 /** Droit à l'oubli : suppression du compte et de ses données (mot de passe demandé). */
-accountApi.delete('/me', limitAuthAttempts, async (req, res) => {
+accountApi.delete('/me', authGate, async (req, res) => {
   const { password } = parse(z.object({ password: z.string().min(1, 'Mot de passe requis.') }), req.body);
   const row = await db.prepare('SELECT * FROM users WHERE id = ?').get(me(req).id) as unknown as UserRow;
-  if (!bcrypt.compareSync(password, row.password_hash)) throw new HttpError(403, 'Mot de passe incorrect.');
+  await assertAccountOpen(`del:${row.id}`);
+  if (!(await verifyPassword(password, row.password_hash)).ok) {
+    await recordAuthFailure(req, `del:${row.id}`, 'suppression de compte');
+    throw new HttpError(403, 'Mot de passe incorrect.');
+  }
   await assertNotLastAdmin(row.id);
   await eraseUser(row.id);
   res.json({ ok: true });
@@ -180,10 +231,22 @@ accountApi.delete('/me', limitAuthAttempts, async (req, res) => {
 
 /* --------------------------------- Équipe --------------------------------- */
 
-accountApi.get('/members', async (_req, res) => {
+accountApi.get('/members', async (req, res) => {
   const online = new Set(onlineUserIds());
+  const staff = me(req).role !== 'guest';
   const rows = await db.prepare('SELECT id, name, email, role, created_at, suspended_at FROM users ORDER BY created_at').all() as unknown as Pick<UserRow, 'id' | 'name' | 'email' | 'role' | 'created_at' | 'suspended_at'>[];
-  res.json({ members: (await mapA(rows, async (r) => ({ ...(await publicUser(r)), createdAt: r.created_at, online: online.has(r.id), suspended: !!r.suspended_at }))) });
+  const fns = await functionsByUser();
+  res.json({
+    members: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      functions: r.suspended_at ? [] : (fns.get(r.id) ?? []),
+      online: online.has(r.id),
+      // Adresse e-mail, date d'arrivée et suspension : réservées à l'équipe (jamais aux invités internes).
+      ...(staff ? { email: r.email, createdAt: r.created_at, suspended: !!r.suspended_at } : {}),
+    })),
+  });
 });
 
 accountApi.patch('/members/:id/role', requireAdmin, async (req, res) => {
@@ -216,18 +279,46 @@ accountApi.delete('/members/:id', requireAdmin, async (req, res) => {
 
 // Super Admin et Fondateurs peuvent inviter ; le code « invité » est réservé au Super Admin.
 accountApi.get('/invite', requireStaff, async (req, res) => {
+  const member = await inviteStatus('member');
+  const guest = me(req).role === 'admin' ? await inviteStatus('guest') : null;
   res.json({
-    code: (await getSetting('invite_code')),
-    guestCode: me(req).role === 'admin' ? (await getSetting('guest_invite_code')) : undefined,
+    code: member.code,
+    expiresAt: member.expiresAt,
+    guestCode: guest?.code,
+    guestExpiresAt: guest?.expiresAt,
   });
 });
 
 accountApi.post('/invite/regenerate', requireAdmin, async (req, res) => {
   const { kind } = parse(z.object({ kind: z.enum(['member', 'guest']).default('member') }), req.body ?? {});
   const code = newInviteCode();
-  await setSetting(kind === 'guest' ? 'guest_invite_code' : 'invite_code', code);
+  const prefix = kind === 'guest' ? 'guest_invite_code' : 'invite_code';
+  const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 86_400_000).toISOString();
+  await setSetting(prefix, code);
+  await setSetting(`${prefix}_expires_at`, expiresAt);
   await logActivity(me(req), 'invite', 'settings', kind, `Code d'invitation (${kind}) régénéré`);
-  res.json({ code });
+  res.json({ code, expiresAt });
+});
+
+/* ------------------------------ Sessions ------------------------------ */
+
+/** Ticket de connexion WebSocket : usage unique, 30 s. Le jeton de session ne circule plus dans l'adresse du WebSocket. */
+accountApi.post('/ws-ticket', async (req, res) => {
+  const ticket = crypto.randomBytes(32).toString('base64url');
+  const hash = crypto.createHash('sha256').update(ticket).digest('hex');
+  await db.run('DELETE FROM ws_tickets WHERE expires_at <= ?', now());
+  await db.run('INSERT INTO ws_tickets (hash, user_id, expires_at) VALUES (?,?,?)', hash, me(req).id, new Date(Date.now() + 30_000).toISOString());
+  res.json({ ticket, expiresIn: 30 });
+});
+
+/** « Déconnecter tous mes appareils » : toutes les sessions et connexions temps réel existantes cessent ; celle-ci continue. */
+accountApi.post('/me/sessions/revoke', async (req, res) => {
+  const row = await db.prepare('SELECT * FROM users WHERE id = ?').get(me(req).id) as unknown as UserRow;
+  await db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(row.id);
+  await db.prepare('DELETE FROM ws_tickets WHERE user_id = ?').run(row.id);
+  await logActivity(me(req), 'sessions', 'user', row.id, 'Toutes les sessions ont été fermées');
+  disconnectUser(row.id);
+  res.json({ token: signToken({ id: row.id, token_version: row.token_version + 1 }) });
 });
 
 export { requireAuth };

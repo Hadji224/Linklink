@@ -50,7 +50,7 @@ Légende : ✅ conforme · 🟡 partiel / écart assumé · ⛔ non fait · 🌐
 | Chiffrement au repos (AES-256) | 🌐 | Assuré par les hébergeurs (Neon pour la base, Google Drive pour les fichiers) ; non fait par l'application. |
 | bcrypt, CSRF, XSS, injection SQL | ✅ | Voir `docs/securite.md` (bcrypt coût 10, jeton en en-tête : pas de CSRF). |
 | Logs d'accès 12 mois | 🟡 | `DATA_DIR/logs`, purge automatique ; **perdus au redémarrage sur Render gratuit** (disque éphémère) : disque persistant requis pour tenir les 12 mois. |
-| Sauvegarde BDD quotidienne, rétention 30 j | ✅ | Neon : historique et restauration à un instant donné ; copie à la demande `npm run backup`. |
+| Sauvegarde BDD quotidienne, rétention 30 j | ⚠️ | Neon : historique et restauration à un instant donné — **la durée dépend de l'offre** (courte en gratuit) ; copie à la demande `npm run backup`. Une sauvegarde planifiée de 30 jours suppose une offre payante ou une tâche externe. |
 | Fichiers : réplication géographique | 🌐 | À mettre en place côté hébergement (rsync/S3). |
 | Test de restauration mensuel | 🟡 | Procédure dans `docs/deploiement.md` (restauration dans une branche Neon ou une base de test) ; à planifier par l'équipe. |
 | RGPD : registre, accès, oubli | ✅ | `docs/rgpd-registre.md`, export et suppression dans le profil. |

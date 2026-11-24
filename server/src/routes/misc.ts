@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { requireAdmin } from '../auth.js';
 import { can, deny } from '../access.js';
-import { db, LOG_DIR, now, today } from '../db.js';
+import { db, now, today } from '../db.js';
+import { flushAccessLogs } from '../logger.js';
 import { idParam, me, parse } from '../http.js';
 import { canSeeFolder, isStaff, visibleProjectIds } from '../perm.js';
 import { canSeeMeeting } from './meetings.js';
@@ -97,12 +96,13 @@ miscApi.get('/activity', async (req, res) => {
   res.json({ activity: rows.map((r) => ({ id: r.id, userName: r.user_name, action: r.action, entity: r.entity, summary: r.summary, createdAt: r.created_at })), hasMore: rows.length === limit });
 });
 
-// Logs d'accès (conservés 12 mois) : lecture réservée au Super Admin.
-miscApi.get('/admin/access-logs', requireAdmin, (_req, res) => {
-  const files = fs.readdirSync(LOG_DIR).filter((f) => f.startsWith('access-')).sort();
-  const last = files.at(-1);
-  const lines = last ? fs.readFileSync(path.join(LOG_DIR, last), 'utf8').trim().split('\n').slice(-200) : [];
-  res.json({ files, lines });
+// Logs d'accès (conservés 12 mois, en base) : lecture réservée au Super Admin. Les 200 dernières lignes, la plus récente en bas.
+miscApi.get('/admin/access-logs', requireAdmin, async (_req, res) => {
+  await flushAccessLogs();
+  const rows = (await db.all<{ t: string; ip: string | null; user_id: string | null; method: string; path: string; status: number; ms: number }>(
+    'SELECT t, ip, user_id, method, path, status, ms FROM access_logs ORDER BY id DESC LIMIT 200',
+  )).reverse();
+  res.json({ lines: rows.map((r) => JSON.stringify({ t: r.t, ip: r.ip, user: r.user_id, method: r.method, path: r.path, status: r.status, ms: r.ms })) });
 });
 
 export { idParam };

@@ -58,6 +58,9 @@ async function rawRequest(path: string, { method = 'GET', body, form }: Options 
   } catch {
     throw new ApiError(0, 'Impossible de joindre le serveur. Vérifiez votre connexion.');
   }
+  // Session glissante : le serveur renvoie un jeton neuf quand le nôtre a plus d'un jour (sauf si on s'est déconnecté entre-temps).
+  const refreshed = res.headers.get('x-refreshed-token');
+  if (refreshed && token && getToken() === token) setToken(refreshed);
   if (!res.ok) {
     let message = 'Une erreur est survenue.';
     try {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { db, now, today } from './db.js';
 import { storage } from './storage.js';
 import { purgeOldLogs } from './logger.js';
+import { purgeRateLimits } from './ratelimit.js';
 import { notify } from './notify.js';
 import { meetingAudience } from './routes/meetings.js';
 import { expireEmergency } from './routes/governance.js';
@@ -97,7 +98,8 @@ export function startJobs() {
     try { await fn(); } catch (e) { console.error('Tâche planifiée en échec :', e); }
   };
   const hourly = safe(async () => { await runReminders(); await runValidationReminders(); await expireEmergency(); });
-  const daily = safe(async () => { await purgeOldLogs(); });
+  const daily = safe(async () => { await purgeOldLogs(); await purgeRateLimits(); await db.run('DELETE FROM ws_tickets WHERE expires_at <= ?', now()); });
+  const frequent = safe(async () => { await purgeRateLimits(); await db.run('DELETE FROM ws_tickets WHERE expires_at <= ?', now()); });
   const purge = safe(async () => {
     const r = await purgeChatFiles();
     if (r.expired || r.overBudget || r.orphans) console.log(`Pièces jointes des salons : ${r.expired} expirée(s), ${r.overBudget} retirée(s) (place), ${r.orphans} orpheline(s).`);
@@ -107,5 +109,6 @@ export function startJobs() {
   void purge();
   setInterval(hourly, 10 * 60_000).unref();
   setInterval(daily, 6 * 3600_000).unref();
+  setInterval(frequent, 30 * 60_000).unref();
   setInterval(purge, Number(process.env.CHAT_PURGE_EVERY_MS) || 3600_000).unref();
 }

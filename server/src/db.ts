@@ -103,6 +103,33 @@ export async function tx<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Verrou de session PostgreSQL pour sérialiser les écritures entre plusieurs instances du serveur
+ * (writelock.ts). Clé différente de TX_LOCK : une requête tient celui-ci, puis `tx()` prend l'autre, jamais l'inverse.
+ * Si la connexion tombe, PostgreSQL libère le verrou tout seul.
+ */
+const REQUEST_LOCK = 724_002;
+export async function acquireRequestLock(): Promise<() => Promise<void>> {
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [REQUEST_LOCK]);
+  } catch (e) {
+    client.release(true);
+    throw e;
+  }
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [REQUEST_LOCK]);
+      client.release();
+    } catch {
+      client.release(true); // connexion douteuse : on la détruit, le verrou disparaît avec elle
+    }
+  };
+}
+
 export const closeDb = () => pool.end();
 
 // ─── Migrations ─────────────────────────────────────────────────────────────────────────────────
@@ -122,6 +149,34 @@ const MIGRATIONS: { id: number; name: string; sql: string }[] = [
       ALTER TABLE files ADD COLUMN IF NOT EXISTS expires_at TEXT;
       ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_at TEXT;
       CREATE INDEX IF NOT EXISTS idx_files_expiry ON files(expires_at) WHERE purged_at IS NULL AND expires_at IS NOT NULL;
+    `,
+  },
+  {
+    id: 3,
+    name: 'sécurité : limiteur de tentatives, tickets WebSocket, journaux d\'accès en base',
+    sql: `
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        key      TEXT PRIMARY KEY,
+        count    INTEGER NOT NULL,
+        reset_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ws_tickets (
+        hash       TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ws_tickets_user ON ws_tickets(user_id);
+      CREATE TABLE IF NOT EXISTS access_logs (
+        id      BIGSERIAL PRIMARY KEY,
+        t       TEXT NOT NULL,
+        ip      TEXT,
+        user_id TEXT,
+        method  TEXT NOT NULL,
+        path    TEXT NOT NULL,
+        status  INTEGER NOT NULL,
+        ms      INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_access_logs_t ON access_logs(t);
     `,
   },
 ];
@@ -147,6 +202,9 @@ export async function setSetting(key: string, value: string) {
   await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
 }
 
+/** Durée de validité d'un code d'invitation (jours) ; « Régénérer » dans Équipe remet un code neuf. */
+export const INVITE_TTL_DAYS = Number(process.env.INVITE_TTL_DAYS) || 30;
+
 export function newInviteCode() {
   // Format XXXX-XXXX, alphabet sans caractères ambigus.
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -163,6 +221,18 @@ await tx(async () => {
   if (!(await getSetting('invite_code'))) await setSetting('invite_code', newInviteCode());
   if (!(await getSetting('guest_invite_code'))) await setSetting('guest_invite_code', newInviteCode());
   storedJwtSecret = (await getSetting('jwt_secret')) as string;
+
+  // Les anciennes versions écrivaient les codes dans les journaux du serveur : rotation unique, puis expiration.
+  const expiry = new Date(Date.now() + INVITE_TTL_DAYS * 86_400_000).toISOString();
+  if (!(await getSetting('invite_rotated_v2'))) {
+    await setSetting('invite_code', newInviteCode());
+    await setSetting('guest_invite_code', newInviteCode());
+    await setSetting('invite_code_expires_at', expiry);
+    await setSetting('guest_invite_code_expires_at', expiry);
+    await setSetting('invite_rotated_v2', now());
+  }
+  if (!(await getSetting('invite_code_expires_at'))) await setSetting('invite_code_expires_at', expiry);
+  if (!(await getSetting('guest_invite_code_expires_at'))) await setSetting('guest_invite_code_expires_at', expiry);
 
   if (((await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM channels WHERE kind='channel'")) as { n: number }).n === 0) {
     const sql = 'INSERT INTO channels (id,kind,name,description,admin_only,created_at) VALUES (?,?,?,?,?,?)';

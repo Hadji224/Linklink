@@ -7,7 +7,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (input: { name: string; email: string; password: string; inviteCode: string; consent: boolean }) => Promise<void>;
+  register: (input: { name: string; email: string; password: string; inviteCode: string; consent: boolean; bootstrapSecret?: string }) => Promise<void>;
   setUser: (u: User) => void;
   /** Recharge le profil, les fonctions et les capacités (après un changement de fonction, de mandat ou de rôle). */
   refreshMe: () => Promise<void>;

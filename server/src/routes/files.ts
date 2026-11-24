@@ -210,6 +210,11 @@ filesApi.post('/files', receiveFile, async (req, res) => {
     if (chanId && file.size > CHAT_MAX_BYTES) {
       throw new HttpError(413, `Pièce jointe trop volumineuse pour un salon (${CHAT_MAX_BYTES / 1024 / 1024} Mo maximum). Pour un fichier plus lourd, déposez-le dans Documents.`);
     }
+    const quota = (Number(process.env.USER_QUOTA_MB) || 1000) * 1024 * 1024;
+    const used = Number((await db.get<{ n: number | null }>("SELECT COALESCE(SUM(size),0) AS n FROM files WHERE user_id = ? AND purged_at IS NULL", me(req).id))?.n ?? 0);
+    if (used + file.size > quota) {
+      throw new HttpError(413, `Quota de stockage atteint (${Math.round(quota / 1024 / 1024)} Mo par personne) : supprimez des fichiers avant d'en ajouter.`);
+    }
     // Toutes les vérifications sont passées : on range le fichier, puis on l'enregistre.
     //  - pièce jointe de salon : relais temporaire en base, supprimé après CHAT_RETENTION_DAYS jours ;
     //  - tâche ou Documents : disque ou Google Drive, conservé.

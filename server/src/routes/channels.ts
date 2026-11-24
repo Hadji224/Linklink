@@ -57,20 +57,34 @@ export async function postMessage(channel: ChannelRow, user: { id: string; name:
   return message;
 }
 
-async function channelShape(c: ChannelRow, userId: string) {
+interface ChannelStats { unread: Map<string, number>; last: Map<string, string>; names: Map<string, string> }
+
+/** Non-lus, dernier message et noms : 3 requêtes groupées au lieu de 3 par salon. */
+async function channelStats(userId: string): Promise<ChannelStats> {
+  const unreadRows = await db.all<{ channel_id: string; n: number }>(
+    `SELECT m.channel_id, COUNT(*) AS n FROM messages m
+       LEFT JOIN channel_reads r ON r.channel_id = m.channel_id AND r.user_id = ?
+      WHERE m.user_id <> ?
+        AND m.created_at > COALESCE(r.last_read_at, (SELECT created_at FROM users WHERE id = ?))
+      GROUP BY m.channel_id`,
+    userId, userId, userId,
+  );
+  const lastRows = await db.all<{ channel_id: string; at: string }>('SELECT channel_id, MAX(created_at) AS at FROM messages GROUP BY channel_id');
+  const nameRows = await db.all<{ id: string; name: string }>('SELECT id, name FROM users');
+  return {
+    unread: new Map(unreadRows.map((r) => [r.channel_id, Number(r.n)])),
+    last: new Map(lastRows.map((r) => [r.channel_id, r.at])),
+    names: new Map(nameRows.map((r) => [r.id, r.name])),
+  };
+}
+
+async function channelShape(c: ChannelRow, userId: string, stats?: ChannelStats) {
+  const st = stats ?? (await channelStats(userId));
   const peerId = c.kind === 'dm' ? (c.dm_a === userId ? c.dm_b : c.dm_a) : null;
-  const peer = peerId ? (await db.prepare('SELECT id, name FROM users WHERE id = ?').get(peerId) as { id: string; name: string } | undefined) : undefined;
-  const unread = (
-    await db
-            .prepare(
-              `SELECT COUNT(*) AS n FROM messages m
-         WHERE m.channel_id = ? AND m.user_id <> ?
-           AND m.created_at > COALESCE((SELECT last_read_at FROM channel_reads WHERE channel_id = ? AND user_id = ?),
-                                       (SELECT created_at FROM users WHERE id = ?))`,
-            )
-            .get(c.id, userId, c.id, userId, userId) as { n: number }
-  ).n;
-  const last = await db.prepare('SELECT created_at FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT 1').get(c.id) as { created_at: string } | undefined;
+  const peerName = peerId ? st.names.get(peerId) : undefined;
+  const peer = peerId && peerName ? { id: peerId, name: peerName } : undefined;
+  const unread = st.unread.get(c.id) ?? 0;
+  const last = st.last.has(c.id) ? { created_at: st.last.get(c.id) as string } : undefined;
   return {
     id: c.id,
     kind: c.kind,
@@ -86,12 +100,14 @@ async function channelShape(c: ChannelRow, userId: string) {
 
 export async function unreadByChannel(user: AuthUser) {
   const rows = await db.prepare('SELECT * FROM channels').all() as unknown as ChannelRow[];
-  return (await mapA((await filterA(rows, async (c) => await canAccessChannel(user, c))), async (c) => await channelShape(c, user.id))).filter((c) => c.unread > 0);
+  const stats = await channelStats(user.id);
+  return (await mapA((await filterA(rows, async (c) => await canAccessChannel(user, c))), async (c) => await channelShape(c, user.id, stats))).filter((c) => c.unread > 0);
 }
 
 channelsApi.get('/channels', async (req, res) => {
   const rows = await db.prepare('SELECT * FROM channels ORDER BY admin_only DESC, name').all() as unknown as ChannelRow[];
-  const visible = await mapA((await filterA(rows, async (c) => await canAccessChannel(me(req), c))), async (c) => await channelShape(c, me(req).id));
+  const stats = await channelStats(me(req).id);
+  const visible = await mapA((await filterA(rows, async (c) => await canAccessChannel(me(req), c))), async (c) => await channelShape(c, me(req).id, stats));
   visible.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
   res.json({ channels: visible });
 });

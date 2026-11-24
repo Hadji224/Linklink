@@ -17,11 +17,11 @@ import { tasksApi } from './tasks.js';
 
 export const api = Router();
 
+api.use(accessLogger); // toutes les requêtes API, y compris connexion et inscription
 api.use(serializeWrites);
 api.use(publicApi);
 api.use(brandingPublicApi);
 api.use(requireAuth);
-api.use(accessLogger);
 for (const r of [accountApi, brandingApi, governanceApi, projectsApi, tasksApi, expensesApi, communicationsApi, channelsApi, filesApi, meetingsApi, miscApi]) api.use(r);
 
 api.use((_req, res) => {

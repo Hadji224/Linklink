@@ -39,8 +39,10 @@ export interface User {
   can?: Partial<Record<Capability, boolean>>;
 }
 
-export interface Member extends User {
-  createdAt: string;
+/** Les invités ne reçoivent ni l'e-mail ni la date d'inscription des autres membres (le serveur les retire). */
+export interface Member extends Omit<User, 'email'> {
+  email?: string;
+  createdAt?: string;
   online: boolean;
   suspended?: boolean;
 }

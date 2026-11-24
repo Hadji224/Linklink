@@ -375,6 +375,12 @@ test('profil, RGPD, journal, pages légales', async () => {
   const data = JSON.parse(fs.readFileSync(await (await dl).path(), 'utf8'));
   expect(data.profil.email).toBe('moussa@linklink.test');
   await founder.screenshot({ path: path.join(SCREENS, '12-profil.png') });
+  // « Déconnecter tous mes appareils » : un autre appareil (même compte) est déconnecté, celui-ci reste ouvert.
+  await founder.getByRole('button', { name: 'Déconnecter tous mes appareils' }).click();
+  await founder.getByRole('button', { name: 'Déconnecter les autres appareils' }).click();
+  await expect(founder.getByText('Tous les autres appareils sont déconnectés')).toBeVisible();
+  await founder.reload();
+  await expect(founder.getByRole('heading', { name: 'Mes données (RGPD)' })).toBeVisible();
 
   await go(admin, 'journal');
   await expect(admin.getByText(/Projet « Application mobile » créé/)).toBeVisible();

@@ -7,7 +7,8 @@ import { go } from '../route';
 import { FN_LABEL, ROLE_LABEL, type Role } from '../types';
 import { Avatar, ErrorNote, Icon, PageHeader, RoleChip, useConfirm, useToast } from '../ui';
 
-function CodeBox({ label, code, onRegenerate, help }: { label: string; code: string; onRegenerate?: () => void; help: string }) {
+function CodeBox({ label, code, onRegenerate, help, expiresAt }: { label: string; code: string; onRegenerate?: () => void; help: string; expiresAt?: string }) {
+  const days = expiresAt ? Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000) : null;
   const toast = useToast();
   return (
     <div className="card p-4">
@@ -20,6 +21,11 @@ function CodeBox({ label, code, onRegenerate, help }: { label: string; code: str
         }}>Copier</button>
         {onRegenerate && <button className="btn btn-ghost btn-sm" onClick={onRegenerate}>Régénérer</button>}
       </div>
+      {days !== null && (
+        <p className={`mt-2 text-xs ${days <= 0 ? 'font-semibold text-red-700' : 'text-slate'}`}>
+          {days <= 0 ? 'Code expiré : régénérez-le pour inviter quelqu\'un.' : `Expire dans ${days} jour${days > 1 ? 's' : ''}.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -29,21 +35,21 @@ export function Team() {
   const { members, refreshMembers } = useApp();
   const confirm = useConfirm();
   const toast = useToast();
-  const [codes, setCodes] = useState<{ code?: string; guestCode?: string }>({});
+  const [codes, setCodes] = useState<{ code?: string; guestCode?: string; expiresAt?: string; guestExpiresAt?: string }>({});
   const [error, setError] = useState('');
   const { logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const canInvite = user?.role !== 'guest';
 
   useEffect(() => {
-    if (canInvite) api<{ code: string; guestCode?: string }>('/invite').then(setCodes).catch(() => {});
+    if (canInvite) api<{ code: string; guestCode?: string; expiresAt?: string; guestExpiresAt?: string }>('/invite').then(setCodes).catch(() => {});
   }, [canInvite]);
 
   async function regenerate(kind: 'member' | 'guest') {
     if (!(await confirm({ title: "Régénérer le code d'invitation ?", message: "L'ancien code ne fonctionnera plus.", confirmLabel: 'Régénérer' }))) return;
     try {
-      const r = await api<{ code: string }>('/invite/regenerate', { method: 'POST', body: { kind } });
-      setCodes((c) => (kind === 'guest' ? { ...c, guestCode: r.code } : { ...c, code: r.code }));
+      await api('/invite/regenerate', { method: 'POST', body: { kind } });
+      setCodes(await api('/invite'));
       toast.success('Nouveau code créé');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Action impossible.');
@@ -88,14 +94,14 @@ export function Team() {
               <Avatar name={m.name} size={44} online={m.online} />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-bold">{m.name} {m.id === user?.id && <span className="text-sm font-normal text-electric">(vous)</span>}</p>
-                {m.role !== 'guest' || isAdmin ? <p className="truncate text-sm text-slate">{m.email}</p> : null}
+                {m.email && (m.role !== 'guest' || isAdmin) ? <p className="truncate text-sm text-slate">{m.email}</p> : null}
                 {(m.functions?.length || m.suspended) ? (
                   <p className="mt-0.5 flex flex-wrap gap-1">
                     {m.functions?.map((f) => <span key={f} className="badge bd-electric">{FN_LABEL[f]}</span>)}
                     {m.suspended && <span className="badge bd-danger">Compte suspendu</span>}
                   </p>
                 ) : null}
-                <p className="text-xs text-slate">Arrivé le {formatShortDate(m.createdAt)}</p>
+                {m.createdAt && <p className="text-xs text-slate">Arrivé le {formatShortDate(m.createdAt)}</p>}
               </div>
               {isAdmin && m.id !== user?.id && m.role !== 'admin' ? (
                 <select aria-label={`Rôle de ${m.name}`} className="field !w-auto" value={m.role} onChange={(e) => void setRole(m.id, e.target.value as Role)}>
@@ -113,10 +119,10 @@ export function Team() {
         </ul>
 
         {canInvite && codes.code && (
-          <CodeBox label="Code d'invitation — Fondateurs" code={codes.code} help="À donner à un nouveau fondateur : il pourra créer son compte avec ce code." onRegenerate={isAdmin ? () => void regenerate('member') : undefined} />
+          <CodeBox label="Code d'invitation — Fondateurs" code={codes.code} help="À donner à un nouveau fondateur : il pourra créer son compte avec ce code." expiresAt={codes.expiresAt} onRegenerate={isAdmin ? () => void regenerate('member') : undefined} />
         )}
         {isAdmin && codes.guestCode && (
-          <CodeBox label="Code d'invitation — Invités internes" code={codes.guestCode} help="Pour un prestataire temporaire : accès limité aux projets où vous l'ajoutez." onRegenerate={() => void regenerate('guest')} />
+          <CodeBox label="Code d'invitation — Invités internes" code={codes.guestCode} help="Pour un prestataire temporaire : accès limité aux projets où vous l'ajoutez." expiresAt={codes.guestExpiresAt} onRegenerate={() => void regenerate('guest')} />
         )}
         <button className="btn btn-ghost w-full md:w-auto" onClick={async () => { if (await confirm({ title: 'Se déconnecter ?', confirmLabel: 'Se déconnecter' })) logout(); }}>
           <Icon name="logout" className="h-4 w-4" /> Se déconnecter

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { API_BASE, getToken } from './api';
+import { api, API_BASE, getToken } from './api';
 import type { RealtimeEvent } from './types';
 
 type Listener = (event: RealtimeEvent) => void;
@@ -24,12 +24,22 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     let attempt = 0;
     let stopped = false;
 
-    const connect = () => {
-      const token = getToken();
-      if (!token || stopped) return;
+    const connect = async () => {
+      if (!getToken() || stopped) return;
+      // Ticket à usage unique (30 s) : le jeton de session ne voyage jamais dans l'adresse du WebSocket.
+      let ticket: string;
+      try {
+        ticket = (await api<{ ticket: string }>('/ws-ticket', { method: 'POST', body: {} })).ticket;
+      } catch {
+        if (stopped) return;
+        attempt += 1;
+        timer = setTimeout(() => void connect(), Math.min(1000 * 2 ** attempt, 15_000));
+        return;
+      }
+      if (stopped) return;
       const base = API_BASE ? new URL(API_BASE) : location;
       const proto = base.protocol === 'https:' ? 'wss' : 'ws';
-      socket = new WebSocket(`${proto}://${base.host}/ws?token=${encodeURIComponent(token)}`);
+      socket = new WebSocket(`${proto}://${base.host}/ws?ticket=${encodeURIComponent(ticket)}`);
       socket.onopen = () => {
         attempt = 0;
         setConnected(true);
@@ -47,7 +57,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         setConnected(false);
         if (stopped) return;
         attempt += 1;
-        timer = setTimeout(connect, Math.min(1000 * 2 ** attempt, 15_000));
+        timer = setTimeout(() => void connect(), Math.min(1000 * 2 ** attempt, 15_000));
       };
     };
 
@@ -55,11 +65,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       // Au retour sur l'application (téléphone déverrouillé), on reconnecte tout de suite.
       if (document.visibilityState === 'visible' && (!socket || socket.readyState === WebSocket.CLOSED)) {
         clearTimeout(timer);
-        connect();
+        void connect();
       }
     };
 
-    connect();
+    void connect();
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       stopped = true;

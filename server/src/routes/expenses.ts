@@ -269,6 +269,13 @@ expensesApi.post('/expenses/:id/payments', async (req, res) => {
   const discrepancy = mismatch.join(' ; ');
   const pid = uid();
   await tx(async () => {
+        // Re-vérification dans la transaction (verrouillée) : deux paiements simultanés ne
+        // peuvent plus dépasser le montant approuvé ni payer une dépense déjà soldée/modifiée.
+        const current = await getExpense(e.id);
+        if (current.status !== 'awaiting_payment') throw new HttpError(409, 'Cette dépense ne peut plus recevoir de paiement.');
+        if (!discrepancy && (await paidMinor(current)) + amountMinor > (current.approved_minor as number)) {
+          throw new HttpError(409, `Paiement refusé : le total dépasserait le montant approuvé (${money(current.approved_minor as number, current.approved_currency as string)}).`);
+        }
         await db.prepare('INSERT INTO expense_payments (id,expense_id,cashier_id,cashier_name,amount_minor,currency,beneficiary,proof,discrepancy,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
                 pid, e.id, user.id, user.name, amountMinor, currency, beneficiary, input.proof, discrepancy, 'recorded', now(),
               );

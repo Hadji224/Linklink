@@ -76,3 +76,13 @@ Branchez [UptimeRobot](https://uptimerobot.com) (gratuit) sur `https://<api>/api
 
 ## Retour arrière
 Redéployer le commit précédent. Les migrations de base ne font qu'ajouter (table `schema_migrations`) : pour une migration qui modifie des données, créez d'abord une branche Neon (instantanée) ou une copie `npm run backup`.
+
+
+## Premier démarrage sécurisé (à faire AVANT de créer le premier compte)
+1. Dans Render (service API → *Environment*), définissez **`BOOTSTRAP_SECRET`** (longue chaîne aléatoire) et vérifiez que **`JWT_SECRET`** est bien défini. Sans `BOOTSTRAP_SECRET`, l'inscription du premier compte est **verrouillée** (l'écran l'explique).
+2. Ouvrez l'application : le premier écran demande ce « Code d'initialisation » en plus de vos informations ; le compte créé est l'Administrateur technique.
+3. Une fois le premier compte créé, le secret ne sert plus (vous pouvez le retirer).
+4. Les codes d'invitation expirent après `INVITE_TTL_DAYS` jours (30 par défaut) : régénérez-les depuis l'onglet Équipe.
+5. Les anciens codes d'invitation ont été remplacés lors de la mise à jour de sécurité (ils avaient pu apparaître dans les journaux du serveur).
+
+> **Offre gratuite Render** : l'instance s'endort après 15 min sans visite et son disque est éphémère ; tout ce qui compte (comptes, journaux, tickets, compteurs) est donc en base. Pour la sauvegarde, la fenêtre de restauration de l'offre gratuite de Neon est courte : faites aussi une copie régulière avec `npm run backup`.

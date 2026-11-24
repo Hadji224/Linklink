@@ -1,33 +1,56 @@
 import type { NextFunction, Request, Response } from 'express';
-import fs from 'node:fs';
-import path from 'node:path';
-import { LOG_DIR } from './db.js';
+import { db } from './db.js';
 
-const RETENTION_DAYS = 365; // logs d'accès conservés 12 mois (cahier §6.6)
+const RETENTION_DAYS = 365; // journaux d'accès conservés 12 mois (cahier §6.6)
 
-/** Journal d'accès : une ligne JSON par requête API, un fichier par mois. Aucune donnée de contenu. */
+interface Line { t: string; ip: string | null; user: string | null; method: string; path: string; status: number; ms: number }
+
+/**
+ * Journal d'accès : une ligne par requête API (adresse, compte, méthode, chemin sans paramètres, statut, durée) — aucun contenu.
+ * Stocké dans PostgreSQL (le disque de Render est effacé à chaque redémarrage) ; écrit par lots toutes les 5 s pour ne
+ * pas ajouter une écriture à chaque requête.
+ */
+let buffer: Line[] = [];
+let flushing = false;
+
+export async function flushAccessLogs() {
+  if (flushing || !buffer.length) return;
+  flushing = true;
+  const batch = buffer.splice(0, 500);
+  try {
+    const values: string[] = [];
+    const params: (string | number | null)[] = [];
+    for (const l of batch) {
+      values.push('(?,?,?,?,?,?,?)');
+      params.push(l.t, l.ip, l.user, l.method, l.path, l.status, l.ms);
+    }
+    await db.run(`INSERT INTO access_logs (t,ip,user_id,method,path,status,ms) VALUES ${values.join(',')}`, ...params);
+  } catch (e) {
+    console.error('Journal d\'accès : écriture impossible', e instanceof Error ? e.message : e);
+  } finally {
+    flushing = false;
+  }
+}
+
+export function startAccessLogFlush() {
+  setInterval(() => void flushAccessLogs(), 5_000).unref();
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => void flushAccessLogs().finally(() => process.exit(0)));
+  }
+}
+
 export function accessLogger(req: Request, res: Response, next: NextFunction) {
   const start = Date.now();
   res.on('finish', () => {
-    const line = JSON.stringify({
-      t: new Date().toISOString(),
-      ip: req.ip,
-      user: req.user?.id ?? null,
-      method: req.method,
-      path: req.originalUrl.split('?')[0],
-      status: res.statusCode,
-      ms: Date.now() - start,
-    });
-    const file = path.join(LOG_DIR, `access-${new Date().toISOString().slice(0, 7)}.log`);
-    fs.appendFile(file, line + '\n', () => {});
+    const path = req.originalUrl.split('?')[0] ?? '';
+    if (path === '/api/health') return; // la sonde de santé (toutes les 30 s) noierait le journal
+    if (buffer.length > 5000) buffer.shift(); // base injoignable : on garde les plus récentes sans saturer la mémoire
+    buffer.push({ t: new Date().toISOString(), ip: req.ip ?? null, user: req.user?.id ?? null, method: req.method, path: path.slice(0, 300), status: res.statusCode, ms: Date.now() - start });
   });
   next();
 }
 
-export function purgeOldLogs() {
-  const limit = Date.now() - RETENTION_DAYS * 86_400_000;
-  for (const f of fs.readdirSync(LOG_DIR)) {
-    const p = path.join(LOG_DIR, f);
-    if (fs.statSync(p).mtimeMs < limit) fs.rmSync(p, { force: true });
-  }
+export async function purgeOldLogs() {
+  const limit = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString();
+  await db.run('DELETE FROM access_logs WHERE t < ?', limit);
 }

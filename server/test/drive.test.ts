@@ -44,7 +44,7 @@ describe('Stockage Google Drive (serveur Google simulé)', () => {
   });
 
   it('accents et fichiers binaires intacts', async () => {
-    const bytes = Buffer.from([0, 255, 10, 13, 200, 1, 2, 3]);
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 255, 10, 13, 200, 1, 2, 3]);
     const fd = new FormData();
     fd.append('file', new Blob([bytes], { type: 'image/png' }), 'Éléphant été.png');
     const r = await admin.req('POST', '/files', fd);

@@ -12,13 +12,18 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [consent, setConsent] = useState(false);
+  const [bootstrapRequired, setBootstrapRequired] = useState(false);
+  const [bootstrapLocked, setBootstrapLocked] = useState(false);
+  const [bootstrapSecret, setBootstrapSecret] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api<{ hasUsers: boolean }>('/setup')
+    api<{ hasUsers: boolean; bootstrapRequired?: boolean; bootstrapLocked?: boolean }>('/setup')
       .then((r) => {
         setHasUsers(r.hasUsers);
+        setBootstrapRequired(!!r.bootstrapRequired);
+        setBootstrapLocked(!!r.bootstrapLocked);
         if (!r.hasUsers) setMode('register');
       })
       .catch(() => setHasUsers(true));
@@ -32,7 +37,7 @@ export function Login() {
     setBusy(true);
     try {
       if (mode === 'login') await login(email, password);
-      else await register({ name, email, password, inviteCode, consent });
+      else await register({ name, email, password, inviteCode, consent, bootstrapSecret });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Une erreur est survenue.');
     } finally {
@@ -81,6 +86,25 @@ export function Login() {
             />
             {mode === 'register' && <span className="mt-1 block text-xs text-slate">8 caractères minimum.</span>}
           </label>
+          {mode === 'register' && firstAccount && bootstrapLocked && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+              Création du premier compte verrouillée : la personne qui gère le serveur doit d'abord définir la variable <code>BOOTSTRAP_SECRET</code>, puis vous communiquer ce code d'initialisation.
+            </p>
+          )}
+          {mode === 'register' && firstAccount && bootstrapRequired && (
+            <label className="block">
+              <span className="label">Code d'initialisation</span>
+              <input
+                className="field mt-1"
+                type="password"
+                value={bootstrapSecret}
+                onChange={(e) => setBootstrapSecret(e.target.value)}
+                autoComplete="off"
+                required
+              />
+              <span className="mt-1 block text-xs text-slate">Secret défini par l'exploitant du serveur (variable BOOTSTRAP_SECRET).</span>
+            </label>
+          )}
           {mode === 'register' && !firstAccount && (
             <label className="block">
               <span className="label">Code d'invitation</span>
@@ -107,7 +131,7 @@ export function Login() {
           )}
 
           <ErrorNote>{error}</ErrorNote>
-          <button className="btn btn-primary w-full" disabled={busy || hasUsers === null || (mode === 'register' && !consent)}>
+          <button className="btn btn-primary w-full" disabled={busy || hasUsers === null || (mode === 'register' && (!consent || (firstAccount && bootstrapLocked)))}>
             {busy ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
           </button>
 

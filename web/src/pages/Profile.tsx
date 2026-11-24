@@ -45,6 +45,17 @@ export function Profile() {
     }
   }
 
+  async function revokeAll() {
+    if (!(await confirm({ title: 'Déconnecter tous mes appareils ?', message: "Toutes les sessions ouvertes (téléphone, ordinateur…) seront fermées. Celle-ci reste connectée.", confirmLabel: 'Déconnecter les autres appareils' }))) return;
+    try {
+      const r = await api<{ token: string }>('/me/sessions/revoke', { method: 'POST', body: {} });
+      setToken(r.token);
+      toast.success('Tous les autres appareils sont déconnectés');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Action impossible.');
+    }
+  }
+
   async function exportData() {
     try {
       await downloadBlob('/me/export', 'mes-donnees-linklink.json');
@@ -99,6 +110,12 @@ export function Profile() {
           <ErrorNote>{pwError}</ErrorNote>
           <button className="btn btn-primary">Changer le mot de passe</button>
         </form>
+
+        <section className="card space-y-3 p-4">
+          <h2 className="font-bold">Sessions</h2>
+          <p className="text-sm text-slate">Votre session reste ouverte 7 jours et se prolonge tant que vous utilisez l'application. Si vous avez perdu un téléphone ou utilisé un appareil partagé, fermez toutes les autres sessions.</p>
+          <button className="btn btn-ghost" onClick={() => void revokeAll()}>Déconnecter tous mes appareils</button>
+        </section>
 
         <section className="card space-y-3 p-4">
           <h2 className="font-bold">Mes données (RGPD)</h2>

@@ -4,7 +4,8 @@ import express from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { getSetting } from './db.js';
+import { db } from './db.js';
+import { startAccessLogFlush } from './logger.js';
 import { checkStorage } from './storage.js';
 import { startJobs } from './jobs.js';
 import { attachRealtime } from './realtime.js';
@@ -47,7 +48,7 @@ if (CORS_ORIGINS.length) {
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Expose-Headers', 'content-disposition');
+      res.setHeader('Access-Control-Expose-Headers', 'content-disposition, x-refreshed-token');
       res.setHeader('Access-Control-Max-Age', '600');
     }
     if (req.method === 'OPTIONS') return void res.status(204).end();
@@ -73,9 +74,16 @@ attachRealtime(server);
 
 server.listen(PORT, async () => {
   console.log(`LinkLink : http://localhost:${PORT}`);
-  console.log(`Code d'invitation (Fondateurs) : ${(await getSetting('invite_code'))}`);
-  console.log(`Code d'invitation (Invités internes) : ${(await getSetting('guest_invite_code'))}`);
-  console.log("(Le tout premier compte créé devient Administrateur technique, PDG de démarrage.)");
+  // Les codes d'invitation ne sont jamais écrits dans les journaux : les fondateurs les lisent dans Équipe → Inviter.
+  console.log("Codes d'invitation : consultez-les dans l'application (Équipe), jamais dans ces journaux.");
+  const hosted = PROD || !!process.env.RENDER;
+  if (hosted && !(await db.get('SELECT 1 FROM users LIMIT 1'))) {
+    console.log(process.env.BOOTSTRAP_SECRET
+      ? "Aucun compte : le premier compte (Administrateur technique, PDG de démarrage) exige le secret d'initialisation BOOTSTRAP_SECRET."
+      : "Aucun compte : inscription verrouillée tant que BOOTSTRAP_SECRET n'est pas défini sur le serveur.");
+  }
+  if (hosted && !process.env.JWT_SECRET) console.warn("JWT_SECRET n'est pas défini : le secret de session est stocké dans la base. Définissez-le pour le séparer des données.");
   console.log(`Stockage des fichiers : ${await checkStorage()}`);
   startJobs();
+  startAccessLogFlush();
 });

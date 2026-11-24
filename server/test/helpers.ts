@@ -57,22 +57,35 @@ export async function startServer(opts: { dataDir?: string; databaseUrl?: string
   const port = await freePort();
   let child: ChildProcess;
   const codes = { member: '', guest: '' };
+  const readCodes = async () => {
+    const c = new pg.Client({ connectionString: databaseUrl });
+    await c.connect();
+    try {
+      const r = await c.query("SELECT key, value FROM settings WHERE key IN ('invite_code','guest_invite_code')");
+      for (const row of r.rows) {
+        if (row.key === 'invite_code') codes.member = row.value;
+        else codes.guest = row.value;
+      }
+    } finally {
+      await c.end();
+    }
+  };
   const boot = () =>
     new Promise<void>((resolve, reject) => {
       child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
         cwd: path.resolve(import.meta.dirname, '..'),
-        env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, DATABASE_URL: databaseUrl, ...opts.env, AUTH_RATE_LIMIT: '10000', NODE_ENV: 'test' },
+        env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, DATABASE_URL: databaseUrl, AUTH_FAIL_LIMIT_IP: '100000', AUTH_FAIL_LIMIT_ACCOUNT: '100000', AUTH_REQ_LIMIT_IP: '1000000', ...opts.env, NODE_ENV: 'test' },
       });
       let out = '';
+      let ready = false;
       child.stdout?.on('data', (d) => {
         out += d;
-        const m = /Fondateurs\) : (\S+)/.exec(out);
-        const g = /Invités internes\) : (\S+)/.exec(out);
-        if (m && g && out.includes('Le tout premier')) {
-          codes.member = m[1] as string;
-          codes.guest = g[1] as string;
+        if (!ready && out.includes('Stockage des fichiers')) {
+          ready = true;
           // laisse les tâches de démarrage (rappels, sauvegarde) se terminer
-          setTimeout(resolve, 150);
+          setTimeout(() => {
+            readCodes().then(resolve, reject);
+          }, 500);
         }
       });
       child.stderr?.on('data', (d) => process.stderr.write(d));
@@ -144,10 +157,24 @@ export class Client {
     return this;
   }
 
-  async upload(file: { name: string; content: string; type?: string }, fields: Record<string, string> = {}) {
+  /** Envoie un fichier ; sauf `raw`, ajoute l'en-tête réel du format pour passer le contrôle de signature. */
+  async upload(file: { name: string; content: string; type?: string; raw?: boolean }, fields: Record<string, string> = {}) {
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-    fd.append('file', new Blob([file.content], { type: file.type ?? 'application/octet-stream' }), file.name);
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    const head = file.raw ? Buffer.alloc(0) : Buffer.from(HEADS[ext] ?? '', 'latin1');
+    fd.append('file', new Blob([head, Buffer.from(file.content)], { type: file.type ?? 'application/octet-stream' }), file.name);
     return this.req('POST', '/files', fd);
   }
 }
+
+const HEADS: Record<string, string> = {
+  pdf: '%PDF-1.4\n',
+  png: '\x89PNG\r\n\x1a\n',
+  jpg: '\xff\xd8\xff\xe0',
+  jpeg: '\xff\xd8\xff\xe0',
+  gif: 'GIF89a',
+  zip: 'PK\x03\x04',
+  docx: 'PK\x03\x04',
+  xlsx: 'PK\x03\x04',
+};
